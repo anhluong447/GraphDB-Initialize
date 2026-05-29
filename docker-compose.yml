@@ -1,0 +1,20 @@
+version: "3.8"
+services:
+  neo4j:
+    image: neo4j:5.15-community
+    ports:
+      - "7474:7474"   # HTTP (Neo4j Browser)
+      - "7687:7687"   # Bolt
+    environment:
+      NEO4J_AUTH: neo4j/graphrag123
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      NEO4J_dbms_security_procedures_unrestricted: "apoc.*,gds.*"
+    volumes:
+      - ./data/${PROJECT_NAME}/neo4j/data:/data
+      - ./data/${PROJECT_NAME}/neo4j/logs:/logs
+
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+

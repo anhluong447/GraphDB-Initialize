@@ -1,0 +1,30 @@
+# Core
+tree-sitter
+tree-sitter-python
+tree-sitter-javascript
+tree-sitter-typescript
+gitpython
+requests
+python-dotenv
+
+# LLM & Embeddings (via OpenRouter)
+openai
+
+# Graph DB
+neo4j
+
+# Vector DB
+chromadb
+
+# Community Detection
+networkx
+igraph
+leidenalg
+cdlib
+
+# API
+fastapi
+uvicorn
+
+# File Watcher
+watchdog
