@@ -27,15 +27,23 @@ def get_full_graph(limit: int = 200):
         LIMIT $limit
     """, {"limit": limit})
 
+    node_ids = {n["id"] for n in nodes_result}
+
     edges_result = client.run("""
         MATCH (a)-[r]->(b) WHERE a.name IS NOT NULL AND b.name IS NOT NULL
         RETURN id(a) as source, id(b) as target, type(r) as label
         LIMIT $limit
-    """, {"limit": limit * 3})
+    """, {"limit": limit * 5})
+
+    # Filter out dangling edges (where source or target node is not present in nodes list)
+    valid_edges = [
+        dict(e) for e in edges_result
+        if e["source"] in node_ids and e["target"] in node_ids
+    ]
 
     return {
         "nodes": [dict(n) for n in nodes_result],
-        "edges": [dict(e) for e in edges_result],
+        "edges": valid_edges,
     }
 
 
@@ -50,15 +58,23 @@ def get_community_subgraph(community_id: int):
                n.description as description
     """, {"cid": community_id})
 
+    node_ids = {n["id"] for n in nodes}
+
     edges = client.run("""
         MATCH (a)-[r]->(b)
         WHERE a.community_id = $cid AND b.community_id = $cid
         RETURN id(a) as source, id(b) as target, type(r) as label
     """, {"cid": community_id})
 
+    # Filter community edges to guarantee no dangling connections
+    valid_edges = [
+        dict(e) for e in edges
+        if e["source"] in node_ids and e["target"] in node_ids
+    ]
+
     return {
         "nodes": [dict(n) for n in nodes],
-        "edges": [dict(e) for e in edges],
+        "edges": valid_edges,
     }
 
 

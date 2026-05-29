@@ -41,8 +41,10 @@ class CodeChangeHandler(FileSystemEventHandler):
         parsed = [p for p in parsed if p is not None]
         if parsed:
             build_file_nodes(parsed)
-            embed_all_nodes()
-            print(f"[Watcher] Re-indexed: {[p['file'] for p in parsed]}")
+            changed_files = [p["file"] for p in parsed]
+            from embeddings.chroma_client import embed_nodes_for_files
+            embed_nodes_for_files(changed_files)
+            print(f"[Watcher] Re-indexed: {changed_files}")
 
 
 def start_watcher():

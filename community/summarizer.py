@@ -1,4 +1,5 @@
 import openai
+import re
 from graph.neo4j_client import get_client
 from config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, LLM_MODEL
 
@@ -108,28 +109,45 @@ def summarize_all_communities():
 Community members:
 {members_text}
 
-Write a 2-3 sentence summary of this community that answers:
-1. What is the main purpose/theme of this group?
-2. What are the key elements?
-3. Any notable risks, tasks, or decisions?
+Task:
+1. Write a 2-3 sentence summary of this community that describes its main purpose/theme, key elements, and any notable risks, tasks, or decisions.
+2. Provide a short, 2-4 word name for this community.
 
-Keep it under 200 words. Be specific, not generic."""
+Return your response in the following format:
+NAME: <your 2-4 word name>
+SUMMARY: <your 2-3 sentence summary>"""
 
             try:
                 response = client_ai.chat.completions.create(
                     model=LLM_MODEL,
-                    max_tokens=300,
+                    max_tokens=350,
                     messages=[{"role": "user", "content": prompt}]
                 )
-                summary = response.choices[0].message.content.strip()
+                text = response.choices[0].message.content.strip()
 
-                # Infer name
-                response_name = client_ai.chat.completions.create(
-                    model=LLM_MODEL,
-                    max_tokens=20,
-                    messages=[{"role": "user", "content": f"Give a 2-4 word name for this code community. Return ONLY the name:\n\n{summary}"}]
-                )
-                name = response_name.choices[0].message.content.strip()
+                # Parse the name and summary
+                name = f"Community {cid}"
+                summary = ""
+
+                # Extract NAME
+                name_match = re.search(r"NAME:\s*(.*)", text, re.IGNORECASE)
+                if name_match:
+                    name = name_match.group(1).strip()
+                    name = name.strip('"\'*` ')
+
+                # Extract SUMMARY
+                summary_match = re.search(r"SUMMARY:\s*([\s\S]*)", text, re.IGNORECASE)
+                if summary_match:
+                    summary = summary_match.group(1).strip()
+                else:
+                    # Fallback parser
+                    lines = [line.strip() for line in text.split("\n") if line.strip()]
+                    summary_lines = [l for l in lines if not l.upper().startswith("NAME:")]
+                    summary = " ".join(summary_lines)
+
+                if not summary:
+                    summary = text
+
             except Exception as e:
                 name = f"Community {cid}"
                 summary = f"Cluster of related code elements including {members[0]['name']}."

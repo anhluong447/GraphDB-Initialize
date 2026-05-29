@@ -8,7 +8,7 @@ openai_client = openai.OpenAI(
 )
 
 
-def build_node_text(node_record: dict) -> str:
+def build_node_text(node_record: dict, relations_dict: dict = None) -> str:
     """
     Build a comprehensive text representation of a node, including graph relations.
     This is critical — the vector must carry relationship info, not just content.
@@ -18,26 +18,31 @@ def build_node_text(node_record: dict) -> str:
     description = node_record.get("description", "")
     raw_code = node_record.get("raw_code", "")[:500]
 
-    client = get_client()
+    if relations_dict is not None:
+        rel_info = relations_dict.get(name, {"outgoing": [], "incoming": []})
+        outgoing = rel_info["outgoing"]
+        incoming = rel_info["incoming"]
+    else:
+        client = get_client()
 
-    # Get outgoing neighbors from graph
-    result = client.run("""
-        MATCH (n) WHERE n.name = $name
-        OPTIONAL MATCH (n)-[r]->(neighbor)
-        RETURN type(r) as rel_type, neighbor.name as neighbor_name
-        LIMIT 20
-    """, {"name": name})
+        # Get outgoing neighbors from graph
+        result = client.run("""
+            MATCH (n) WHERE n.name = $name
+            OPTIONAL MATCH (n)-[r]->(neighbor)
+            RETURN type(r) as rel_type, neighbor.name as neighbor_name
+            LIMIT 20
+        """, {"name": name})
 
-    outgoing = [f"{r['rel_type']} → {r['neighbor_name']}" for r in result if r['neighbor_name']]
+        outgoing = [f"{r['rel_type']} → {r['neighbor_name']}" for r in result if r['neighbor_name']]
 
-    result2 = client.run("""
-        MATCH (n) WHERE n.name = $name
-        OPTIONAL MATCH (neighbor)-[r]->(n)
-        RETURN type(r) as rel_type, neighbor.name as neighbor_name
-        LIMIT 10
-    """, {"name": name})
+        result2 = client.run("""
+            MATCH (n) WHERE n.name = $name
+            OPTIONAL MATCH (neighbor)-[r]->(n)
+            RETURN type(r) as rel_type, neighbor.name as neighbor_name
+            LIMIT 10
+        """, {"name": name})
 
-    incoming = [f"{r['neighbor_name']} → {r['rel_type']}" for r in result2 if r['neighbor_name']]
+        incoming = [f"{r['neighbor_name']} → {r['rel_type']}" for r in result2 if r['neighbor_name']]
 
     text = f"""
 {node_type}: {name}

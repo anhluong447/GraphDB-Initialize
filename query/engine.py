@@ -67,8 +67,8 @@ def _expand_neighbors(nodes: list[dict], hops: int = 1) -> list[dict]:
 
         result = client.run("""
             MATCH (n) WHERE n.name = $name
-            MATCH (n)-[r*1..2]-(neighbor)
-            WHERE neighbor.name IS NOT NULL
+            MATCH (n)-[:CALLS|IMPLEMENTS|DEPENDS_ON|RELATES_TO|CONTAINS*1..2]-(neighbor)
+            WHERE neighbor.name IS NOT NULL AND NOT neighbor:Community
             RETURN DISTINCT neighbor.name as name,
                    labels(neighbor)[0] as type,
                    neighbor.description as description

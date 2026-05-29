@@ -64,8 +64,17 @@ def run_full_pipeline():
     from extractors.llm_extractor import batch_extract
     from graph.builder import build_semantic_nodes
 
+    significant_files = [
+        pf for pf in parsed_files
+        if len(pf.get("nodes", [])) >= 3
+        and len(pf.get("raw_code", "")) >= 300
+    ]
+    if len(significant_files) < 10:
+        # Fallback to sorting by size if codebase has very few large/modular files
+        significant_files = sorted(parsed_files, key=lambda x: len(x.get("raw_code", "")), reverse=True)[:30]
+
     all_chunks = []
-    for pf in parsed_files[:50]:  # limit 50 files to save API cost
+    for pf in significant_files:
         all_chunks.append({"content": pf.get("raw_code", ""), "file": pf["file"]})
     all_chunks.extend(docs)
 
