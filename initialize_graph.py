@@ -91,6 +91,102 @@ def _is_supported_file(file_path: str) -> bool:
     return Path(file_path).suffix in SUPPORTED_LANGUAGES
 
 
+def _auto_update_parent_gitignore():
+    """Automatically append GraphRAG ignore patterns to the parent project's .gitignore."""
+    parent_gitignore = os.path.join(CODEBASE_PATH, ".gitignore")
+    subfolder_name = os.path.relpath(GRAPHRAG_ROOT, CODEBASE_PATH).replace("\\", "/")
+    
+    lines_to_add = [
+        "",
+        "# GraphRAG data and subfolder venv",
+        ".graphrag_data/",
+        f"{subfolder_name}/venv/",
+        f"{subfolder_name}/.env",
+    ]
+    
+    try:
+        content = ""
+        if os.path.exists(parent_gitignore):
+            with open(parent_gitignore, "r", encoding="utf-8") as f:
+                content = f.read()
+        
+        # Check if already added
+        if ".graphrag_data/" not in content:
+            with open(parent_gitignore, "a", encoding="utf-8", newline="\n") as f:
+                f.write("\n".join(lines_to_add) + "\n")
+            print("[Sync] Automatically appended GraphRAG patterns to parent .gitignore.")
+    except Exception as e:
+        print(f"[Sync] Warning: Could not update parent .gitignore: {e}")
+
+
+def _auto_generate_parent_launchers():
+    """Generate run_graphrag.bat and run_graphrag.sh at the parent project root."""
+    subfolder_name = os.path.relpath(GRAPHRAG_ROOT, CODEBASE_PATH).replace("\\", "/")
+
+    # 1. Windows Launcher
+    bat_path = os.path.join(CODEBASE_PATH, "run_graphrag.bat")
+    bat_content = f"""@echo off
+setlocal
+cd /d "%~dp0"
+if not exist "{subfolder_name}\\venv" (
+    echo [GraphRAG] Virtual environment not found in {subfolder_name}. Creating one...
+    python -m venv {subfolder_name}\\venv
+    if errorlevel 1 (
+        echo Error: Failed to create virtual environment.
+        exit /b 1
+    )
+    echo [GraphRAG] Installing dependencies...
+    call {subfolder_name}\\venv\\Scripts\\activate.bat
+    pip install -r {subfolder_name}\\requirements.txt
+) else (
+    call {subfolder_name}\\venv\\Scripts\\activate.bat
+)
+python {subfolder_name}\\initialize_graph.py %*
+"""
+
+    # 2. Unix Launcher
+    sh_path = os.path.join(CODEBASE_PATH, "run_graphrag.sh")
+    sh_content = f"""#!/bin/bash
+cd "$(dirname "$0")"
+if [ ! -d "{subfolder_name}/venv" ]; then
+    echo "[GraphRAG] Virtual environment not found in {subfolder_name}. Creating one..."
+    python3 -m venv {subfolder_name}/venv
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to create virtual environment."
+        exit 1
+    fi
+    echo "[GraphRAG] Installing dependencies..."
+    source {subfolder_name}/venv/bin/activate
+    pip install -r {subfolder_name}/requirements.txt
+else
+    source {subfolder_name}/venv/bin/activate
+fi
+python3 {subfolder_name}/initialize_graph.py "$@"
+"""
+
+    try:
+        # Write .bat
+        with open(bat_path, "w", encoding="utf-8", newline="\r\n") as f:
+            f.write(bat_content)
+        
+        # Write .sh
+        with open(sh_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(sh_content)
+        
+        # Make sh executable
+        try:
+            import stat
+            st = os.stat(sh_path)
+            os.chmod(sh_path, st.st_mode | stat.S_IEXEC)
+        except Exception:
+            pass
+            
+        print("[Sync] Generated project root launchers: run_graphrag.bat & run_graphrag.sh")
+    except Exception as e:
+        print(f"[Sync] Warning: Could not generate launcher scripts: {e}")
+
+
+
 # ═══════════════════════════════════════════════════════════
 # Git-Diff Engine
 # ═══════════════════════════════════════════════════════════
@@ -387,6 +483,10 @@ def run_incremental_sync():
 # ═══════════════════════════════════════════════════════════
 
 def main():
+    # Automatically handle setup and wrappers for parent project
+    _auto_update_parent_gitignore()
+    _auto_generate_parent_launchers()
+
     parser = argparse.ArgumentParser(
         description="GraphRAG Knowledge Base — Initialize or sync the code knowledge graph."
     )
