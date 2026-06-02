@@ -21,7 +21,7 @@ def get_full_graph(limit: int = 200):
 
     nodes_result = client.run("""
         MATCH (n) WHERE n.name IS NOT NULL
-        RETURN id(n) as id, labels(n)[0] as type, n.name as name,
+        RETURN elementId(n) as id, labels(n)[0] as type, n.name as name,
                n.description as description, n.community_id as community_id,
                n.raw_code as raw_code
         LIMIT $limit
@@ -31,7 +31,7 @@ def get_full_graph(limit: int = 200):
 
     edges_result = client.run("""
         MATCH (a)-[r]->(b) WHERE a.name IS NOT NULL AND b.name IS NOT NULL
-        RETURN id(a) as source, id(b) as target, type(r) as label
+        RETURN elementId(a) as source, elementId(b) as target, type(r) as label
         LIMIT $limit
     """, {"limit": limit * 5})
 
@@ -54,7 +54,7 @@ def get_community_subgraph(community_id: int):
 
     nodes = client.run("""
         MATCH (n) WHERE n.community_id = $cid AND n.name IS NOT NULL
-        RETURN id(n) as id, labels(n)[0] as type, n.name as name,
+        RETURN elementId(n) as id, labels(n)[0] as type, n.name as name,
                n.description as description
     """, {"cid": community_id})
 
@@ -63,7 +63,7 @@ def get_community_subgraph(community_id: int):
     edges = client.run("""
         MATCH (a)-[r]->(b)
         WHERE a.community_id = $cid AND b.community_id = $cid
-        RETURN id(a) as source, id(b) as target, type(r) as label
+        RETURN elementId(a) as source, elementId(b) as target, type(r) as label
     """, {"cid": community_id})
 
     # Filter community edges to guarantee no dangling connections
@@ -142,7 +142,7 @@ def search_nodes(q: str, limit: int = 20):
         MATCH (n) WHERE n.name IS NOT NULL
         AND (toLower(n.name) CONTAINS toLower($q)
              OR toLower(coalesce(n.description, '')) CONTAINS toLower($q))
-        RETURN id(n) as id, labels(n)[0] as type, n.name as name,
+        RETURN elementId(n) as id, labels(n)[0] as type, n.name as name,
                n.description as description, n.community_id as community_id
         LIMIT $limit
     """, {"q": q, "limit": limit})

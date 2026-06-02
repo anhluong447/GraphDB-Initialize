@@ -11,12 +11,12 @@ def build_networkx_graph() -> nx.Graph:
     G = nx.Graph()
 
     # Get all nodes
-    nodes = client.run("MATCH (n) WHERE n.name IS NOT NULL RETURN id(n) as id, labels(n) as labels, n.name as name")
+    nodes = client.run("MATCH (n) WHERE n.name IS NOT NULL RETURN elementId(n) as id, labels(n) as labels, n.name as name")
     for record in nodes:
         G.add_node(record["id"], name=record["name"], label=record["labels"][0] if record["labels"] else "Unknown")
 
     # Get all edges
-    edges = client.run("MATCH (a)-[r]->(b) WHERE a.name IS NOT NULL AND b.name IS NOT NULL RETURN id(a) as from_id, id(b) as to_id, type(r) as rel_type")
+    edges = client.run("MATCH (a)-[r]->(b) WHERE a.name IS NOT NULL AND b.name IS NOT NULL RETURN elementId(a) as from_id, elementId(b) as to_id, type(r) as rel_type")
     for record in edges:
         G.add_edge(record["from_id"], record["to_id"], rel_type=record["rel_type"])
 
@@ -61,7 +61,7 @@ def detect_communities() -> dict:
     client = get_client()
     for node_id, community_id in result.items():
         client.run("""
-            MATCH (n) WHERE id(n) = $node_id
+            MATCH (n) WHERE elementId(n) = $node_id
             SET n.community_id = $community_id
         """, {"node_id": node_id, "community_id": community_id})
 
