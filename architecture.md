@@ -68,18 +68,20 @@ Avoids rebuilding the graph from scratch on every change:
   - `output_spec`: Detailed returns under various conditions (null, error, etc.).
   - `edge_cases`: Boundary values and scenarios likely to cause bugs.
   - `test_recommendations`: Actionable steps on what to mock (databases, external APIs), what test cases to write (Happy/Error paths), and the shape of mock data.
+- **Resumable Extraction**: The query filters out already-enriched nodes (`AND n.how_it_works IS NULL`), permitting the process to be safely paused and resumed without duplicating API calls.
+- **Type Safety**: Includes automatic serialization (`_normalize_property`) to safely store complex structured LLM outputs as strings in Neo4j, preventing database TypeErrors.
 - Stores these specifications directly back into the Neo4j `:Function` nodes.
 
 ### 2.5 Semantic Extractor & Community Manager (`extractors/`, `community/`)
-- **LLM Extractor (`llm_extractor.py`)**: Leverages DeepSeek-V4 (via OpenRouter) to extract human-level abstractions (Concepts, Features, Risks, Decisions, Tasks) from raw code and commits.
+- **LLM Extractor (`llm_extractor.py`)**: Leverages DeepSeek V4-Flash (via OpenRouter) to extract human-level abstractions (Concepts, Features, Risks, Decisions, Tasks) from raw code and commits.
 - **Community Detector (`detector.py`)**: Clusters graph nodes into hierarchical communities using Neo4j APOC/Leiden algorithms.
 - **Community Summarizer (`summarizer.py`)**: Summarizes the role of each community. It automatically bypasses LLM summarization for small communities (< 3 nodes) to minimize token consumption and runtime, and upserts summaries to ChromaDB in batches.
 
 ### 2.6 Hybrid Query Engine (`query/engine.py`)
 Provides context for LLM answering:
 1. **Vector Stage**: Search ChromaDB for the closest code nodes, features, and community summaries.
-2. **Graph Stage**: Perform multi-hop Cypher queries in Neo4j starting from the vector matches to gather relational context (e.g. what calls what, what features depend on what code, and the detailed testing specifications of those nodes).
-3. **Synthesis Stage**: Merges the retrieved context and feeds it to DeepSeek-V4 to generate a final answer.
+2. **Graph Stage**: Perform multi-hop Cypher queries in Neo4j starting from the vector matches to gather relational context (e.g. what calls what, what features depend on what code, and the detailed testing specifications of those nodes). Exposes `coalesce(neighbor.description, neighbor.how_it_works, neighbor.docstring)` to seamlessly fetch specifications for function nodes.
+3. **Synthesis Stage**: Merges the retrieved context and feeds it to DeepSeek V4-Flash to generate a final answer.
 
 ### 2.7 Visualization & API (`visualization/`, `mcp/`)
 - **Backend API**: A FastAPI server exposing endpoints for graph queries, search, node details, and community graphs.
@@ -126,7 +128,7 @@ Stores structural information about a class.
 ## 4. Directory Structure
 
 ```text
-D:\GraphRAG\
+D:\GraphRAG/
 ├── config.py                 # System configuration and environment loader
 ├── docker-compose.yml        # Multi-container orchestration (Neo4j, ChromaDB)
 ├── start_all.bat             # 1-Click launcher script for Windows developers
@@ -157,6 +159,7 @@ Double-click `start_all.bat` or run:
 This boots up the databases in Docker, runs the FastAPI backend on port `8080`, launches the React explorer on port `5173`, and turns on the background file change watcher.
 
 ### Adding a New Project
-1. Update `PROJECT_NAME` and `CODEBASE_PATH` in `.env`.
-2. Run `python main.py` to index and enrich the new codebase.
-3. Launch via `start_all.bat`.
+1. Update `PROJECT_NAME` and `CODEBASE_BASE_DIR` in `.env`.
+2. Khởi động lại docker-compose (`docker compose down && docker compose up -d`).
+3. Run `python main.py` to index and enrich the new codebase.
+4. Launch via `start_all.bat`.
