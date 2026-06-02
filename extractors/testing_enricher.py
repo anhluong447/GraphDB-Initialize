@@ -115,6 +115,13 @@ def _enrich_single_function(func: dict, retries: int = 2) -> dict | None:
     return None
 
 
+def _normalize_property(val) -> str:
+    """Ensure value is a primitive string or JSON serialized string to avoid Neo4j errors."""
+    if isinstance(val, (dict, list)):
+        return json.dumps(val)
+    return str(val) if val is not None else ""
+
+
 def enrich_all_functions(batch_size: int = 8):
     """
     Query all Function nodes from Neo4j that have raw_code (user-defined functions),
@@ -181,9 +188,9 @@ def enrich_all_functions(batch_size: int = 8):
             """, {
                 "name": r["_name"],
                 "file": r["_file"],
-                "how_it_works": r.get("how_it_works", ""),
-                "input_spec": r.get("input_spec", ""),
-                "output_spec": r.get("output_spec", ""),
+                "how_it_works": _normalize_property(r.get("how_it_works", "")),
+                "input_spec": _normalize_property(r.get("input_spec", "")),
+                "output_spec": _normalize_property(r.get("output_spec", "")),
                 "edge_cases": json.dumps(r.get("edge_cases", [])),
                 "test_recommendations": json.dumps(r.get("test_recommendations", [])),
             })
@@ -237,9 +244,9 @@ def enrich_functions_for_files(file_paths: list[str], batch_size: int = 4):
             """, {
                 "name": r["_name"],
                 "file": r["_file"],
-                "how_it_works": r.get("how_it_works", ""),
-                "input_spec": r.get("input_spec", ""),
-                "output_spec": r.get("output_spec", ""),
+                "how_it_works": _normalize_property(r.get("how_it_works", "")),
+                "input_spec": _normalize_property(r.get("input_spec", "")),
+                "output_spec": _normalize_property(r.get("output_spec", "")),
                 "edge_cases": json.dumps(r.get("edge_cases", [])),
                 "test_recommendations": json.dumps(r.get("test_recommendations", [])),
             })
