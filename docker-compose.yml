@@ -12,6 +12,8 @@ services:
     volumes:
       - ./data/${PROJECT_NAME}/neo4j/data:/data
       - ./data/${PROJECT_NAME}/neo4j/logs:/logs
+    tmpfs:
+      - /var/lib/neo4j/run
 
   chromadb:
     image: chromadb/chroma:latest
