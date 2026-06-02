@@ -71,7 +71,7 @@ def _expand_neighbors(nodes: list[dict], hops: int = 1) -> list[dict]:
             WHERE neighbor.name IS NOT NULL AND NOT neighbor:Community
             RETURN DISTINCT neighbor.name as name,
                    labels(neighbor)[0] as type,
-                   neighbor.description as description
+                   coalesce(neighbor.description, neighbor.how_it_works, neighbor.docstring) as description
             LIMIT 10
         """, {"name": name})
 
