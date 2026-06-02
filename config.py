@@ -1,7 +1,10 @@
 import os
 from dotenv import load_dotenv
 
+# Load .env from the current working directory first, and fall back to the config directory
 load_dotenv()
+config_dir = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(config_dir, ".env"))
 
 PROJECT_NAME = os.getenv("PROJECT_NAME", "A20-App-083")
 CODEBASE_BASE_DIR = os.getenv("CODEBASE_BASE_DIR", "D:/GraphRAG/demo_project")
@@ -10,6 +13,11 @@ CODEBASE_BASE_DIR = os.getenv("CODEBASE_BASE_DIR", "D:/GraphRAG/demo_project")
 CODEBASE_PATH = os.getenv("CODEBASE_PATH")
 if not CODEBASE_PATH:
     CODEBASE_PATH = os.path.join(CODEBASE_BASE_DIR, PROJECT_NAME)
+
+# If it's a relative path, resolve it relative to the config file's directory
+if not os.path.isabs(CODEBASE_PATH):
+    CODEBASE_PATH = os.path.abspath(os.path.join(config_dir, CODEBASE_PATH))
+
 CODEBASE_PATH = CODEBASE_PATH.replace("\\", "/")
 
 # GraphRAG data directory — stored inside the target codebase
