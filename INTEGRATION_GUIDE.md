@@ -29,65 +29,60 @@ parent-project/                   ← Thư mục gốc của dự án chính (c�
 
 ---
 
-## 2. Các Bước Cài Đặt Ban Đầu
+## 2. Các Bước Thiết Lập Ban Đầu (Chỉ Cần Làm 1 Lần)
 
-Thực hiện các lệnh dưới đây bên trong thư mục con `graphrag/`:
-
-### Bước 2.1: Tạo môi trường ảo Python & cài đặt thư viện
-```bash
-# Di chuyển vào thư mục con graphrag
-cd graphrag
-
-# Tạo Virtual Environment
-python -m venv venv
-
-# Kích hoạt venv (Windows)
-.\venv\Scripts\activate
-
-# Kích hoạt venv (Linux/macOS)
-source venv/bin/activate
-
-# Cài đặt thư viện
-pip install -r requirements.txt
-```
-
-### Bước 2.2: Cấu hình file `.env`
-Sao chép `.env.example` thành `.env` nằm trong thư mục `graphrag/` và cấu hình các trường sau:
+### Bước 2.1: Cấu hình file `.env`
+Vào thư mục con `graphrag/` (hoặc tên thư mục bạn clone về), sao chép file `.env.example` thành `.env` và điền khóa của bạn:
 
 ```env
-# 1. API Key của OpenRouter để dùng DeepSeek V4-Flash & OpenAI Embedding
+# API Key của OpenRouter để dùng DeepSeek V4-Flash
 OPENROUTER_API_KEY=sk-or-v1-xxxxxxxx...
 
-# 2. Định danh dự án (giúp phân biệt nếu bạn có nhiều dự án chạy chung một máy)
-PROJECT_NAME=my_automation_app
+# Tên nhận dạng dự án của bạn
+PROJECT_NAME=my_project_name
 
-# 3. Đường dẫn dự án cần phân tích (Đặt là '..' để trỏ ra ngoài thư mục gốc dự án cha)
+# Đường dẫn dự án cần phân tích (Đặt là '..' để trỏ ra ngoài thư mục gốc dự án cha)
 CODEBASE_PATH=..
-
-# 4. Các tham số truy cập Neo4j (Mặc định giữ nguyên)
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=graphrag123
 ```
+
+### Bước 2.2: Chạy khởi tạo lần đầu tiên
+Tại thư mục gốc của dự án chính (parent-project), bạn chạy file khởi tạo bằng lệnh Python bình thường:
+
+```bash
+# Chạy trực tiếp từ thư mục gốc của dự án cha (Không cần cd)
+python graphrag/initialize_graph.py
+```
+
+**Ngay khi chạy lệnh này, GraphRAG sẽ TỰ ĐỘNG làm 3 việc:**
+1.  **Tự động cập nhật `.gitignore` của dự án cha:** Thêm các thư mục `.graphrag_data/`, `venv/` của thư mục con, và file `.env` để tránh bị commit lên git.
+2.  **Tự động tạo File khởi chạy nhanh tại thư mục gốc dự án cha:** Tạo ra 2 file `run_graphrag.bat` (Windows) và `run_graphrag.sh` (Linux/macOS) ở ngay thư mục ngoài cùng.
+3.  **Tải và khởi chạy Neo4j & ChromaDB:** Chạy Docker Neo4j và tiến hành phân tích toàn bộ codebase từ đầu.
 
 ---
 
-## 3. Khởi Chạy & Tự Động Đồng Bộ Đồ Thị
+## 3. Chạy Khởi Chạy Và Đồng Bộ Tăng Dần (Mỗi Ngày)
 
-Chạy lệnh sau tại thư mục `graphrag/` (với venv đã kích hoạt):
+Sau lần chạy đầu tiên, bạn **không cần gõ lệnh dài dòng và không cần cd vào thư mục con nữa**. Khi muốn cập nhật code mới sửa đổi vào database đồ thị, bạn chỉ cần mở terminal tại thư mục gốc dự án cha và chạy:
 
-```bash
-python initialize_graph.py
+### Trên Windows:
+```cmd
+.\run_graphrag.bat
 ```
 
-### Cơ chế hoạt động tự động:
-*   **Lần chạy đầu tiên:** Hệ thống tự khởi chạy Neo4j Docker, phân tích cú pháp AST toàn bộ mã nguồn của dự án cha, gọi LLM trích xuất ngữ nghĩa và làm giàu (enrichment) tài liệu kiểm thử. File trạng thái `.graphrag_data/sync_state.json` sẽ được tạo tại dự án cha để lưu lại mã commit hiện tại.
-*   **Các lần chạy sau:** Hệ thống tự động so sánh git diff (bao gồm cả thay đổi chưa commit). Nó sẽ **chỉ xử lý các tệp đã chỉnh sửa, thêm mới hoặc xóa bỏ**, dọn dẹp các node cũ trong Neo4j và ChromaDB, sau đó chọc LLM làm giàu tài liệu kiểm thử riêng cho các hàm thay đổi đó. Quá trình này diễn ra rất nhanh và tiết kiệm token tối đa.
+### Trên Linux / macOS:
+```bash
+./run_graphrag.sh
+```
+
+**Cơ chế của file script khởi chạy nhanh này:**
+*   Nó sẽ tự động kiểm tra xem môi trường ảo `venv` của GraphRAG đã được tạo chưa. Nếu chưa có (ví dụ khi mới clone từ git về), nó **tự động tạo `venv` và cài đặt toàn bộ requirements** từ `requirements.txt`.
+*   Tự động kích hoạt môi trường ảo và chạy đồng bộ.
+*   Cập nhật dữ liệu đồ thị cực nhanh nhờ cơ chế đọc Git Diff để chỉ nạp và làm giàu dữ liệu những file bạn vừa thay đổi.
 
 > [!TIP]
-> **Buộc khởi tạo lại từ đầu:** Nếu bạn muốn xóa toàn bộ đồ thị cũ và chạy phân tích lại toàn bộ dự án từ con số không, hãy chạy:
+> **Buộc khởi tạo lại toàn bộ:** Nếu bạn muốn xóa toàn bộ đồ thị cũ để phân tích lại toàn bộ dự án từ con số không, bạn có thể truyền thêm tham số trực tiếp:
 > ```bash
-> python initialize_graph.py --force-init
+> .\run_graphrag.bat --force-init
 > ```
 
 ---
