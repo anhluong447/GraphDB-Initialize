@@ -36,6 +36,47 @@ Chunk to analyze:
 """
 
 
+def clean_and_parse_json(raw_text: str) -> dict:
+    """Clean and parse JSON from LLM output, handling common issues like markdown wrappers,
+    conversational leading/trailing text, and unescaped newline control characters inside strings.
+    """
+    raw_text = raw_text.strip()
+    
+    # 1. Try to extract JSON structure between first '{' and last '}'
+    start_idx = raw_text.find('{')
+    end_idx = raw_text.rfind('}')
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        raw_text = raw_text[start_idx:end_idx + 1]
+        
+    # 2. Fix unescaped control characters (newlines, tabs) inside JSON string values
+    in_string = False
+    escape = False
+    chars = []
+    for char in raw_text:
+        if char == '"' and not escape:
+            in_string = not in_string
+            chars.append(char)
+        elif in_string:
+            if char == '\n':
+                chars.append('\\n')
+            elif char == '\r':
+                chars.append('\\r')
+            elif char == '\t':
+                chars.append('\\t')
+            else:
+                chars.append(char)
+        else:
+            chars.append(char)
+            
+        if char == '\\' and not escape:
+            escape = True
+        else:
+            escape = False
+            
+    clean_text = "".join(chars)
+    return json.loads(clean_text)
+
+
 def extract_entities_from_chunk(chunk_text: str, chunk_meta: dict, retries: int = 2) -> dict:
     """Call LLM to extract entities and relations from a chunk."""
     for attempt in range(retries + 1):
@@ -55,20 +96,15 @@ def extract_entities_from_chunk(chunk_text: str, chunk_meta: dict, retries: int 
                     continue
                 print(f"[Extractor] Empty response for {chunk_meta.get('file', '')}")
                 return {"entities": [], "relations": [], "source": chunk_meta}
-            raw = content.strip()
-            # Strip markdown if present
-            raw = raw.replace("```json", "").replace("```", "").strip()
-            result = json.loads(raw)
+            
+            result = clean_and_parse_json(content)
             result["source"] = chunk_meta
             return result
-        except json.JSONDecodeError as e:
-            print(f"[Extractor] JSON error for {chunk_meta.get('file', '')}: {e}")
-            return {"entities": [], "relations": [], "source": chunk_meta}
-        except Exception as e:
+        except (json.JSONDecodeError, Exception) as e:
             if attempt < retries:
                 time.sleep(1)
                 continue
-            print(f"[Extractor] Error for {chunk_meta.get('file', '')}: {e}")
+            print(f"[Extractor] Error for {chunk_meta.get('file', '')} after {attempt + 1} attempts: {e}")
             return {"entities": [], "relations": [], "source": chunk_meta}
     return {"entities": [], "relations": [], "source": chunk_meta}
 
@@ -95,9 +131,7 @@ Return ONLY valid JSON:
         content = response.choices[0].message.content
         if content is None:
             return {"entities": [], "relations": []}
-        raw = content.strip()
-        raw = raw.replace("```json", "").replace("```", "").strip()
-        return json.loads(raw)
+        return clean_and_parse_json(content)
     except Exception:
         return {"entities": [], "relations": []}
 
