@@ -22,7 +22,7 @@ def run_full_pipeline():
     print(f"Target codebase: {CODEBASE_PATH}")
 
     # 1. Start Docker containers
-    print("\n[1/8] Starting databases...")
+    print("\n[1/9] Starting databases...")
     import subprocess
     try:
         subprocess.run(["docker-compose", "up", "-d"], cwd=os.path.dirname(os.path.abspath(__file__)), check=True)
@@ -38,13 +38,13 @@ def run_full_pipeline():
             print("  Make sure Neo4j is running manually.")
 
     # 2. Init graph indexes
-    print("\n[2/8] Initializing graph schema...")
+    print("\n[2/9] Initializing graph schema...")
     from graph.neo4j_client import get_client
     client = get_client()
     client.create_indexes()
 
     # 3. Parse codebase
-    print("\n[3/8] Parsing codebase...")
+    print("\n[3/9] Parsing codebase...")
     from parsers.ast_parser import parse_codebase
     from parsers.doc_parser import parse_docs
     from parsers.git_parser import parse_git_history
@@ -54,13 +54,13 @@ def run_full_pipeline():
     commits = parse_git_history(CODEBASE_PATH, max_commits=200)
 
     # 4. Build structural graph
-    print("\n[4/8] Building structural graph...")
+    print("\n[4/9] Building structural graph...")
     from graph.builder import build_file_nodes, build_git_nodes
     build_file_nodes(parsed_files)
     build_git_nodes(commits)
 
     # 5. LLM extraction
-    print("\n[5/8] Extracting semantic entities (LLM)...")
+    print("\n[5/9] Extracting semantic entities (LLM)...")
     from extractors.llm_extractor import batch_extract
     from graph.builder import build_semantic_nodes
 
@@ -82,19 +82,24 @@ def run_full_pipeline():
     build_semantic_nodes(extracted)
 
     # 6. Embed nodes
-    print("\n[6/8] Embedding nodes...")
+    print("\n[6/9] Embedding nodes...")
     from embeddings.chroma_client import embed_all_nodes
     embed_all_nodes()
 
-    # 7. Community detection
-    print("\n[7/8] Detecting communities...")
+    # 7. AI Testing Enrichment
+    print("\n[7/9] Enriching functions with AI test specs...")
+    from extractors.testing_enricher import enrich_all_functions
+    enrich_all_functions()
+
+    # 8. Community detection
+    print("\n[8/9] Detecting communities...")
     from community.detector import detect_communities
     from community.summarizer import summarize_all_communities
     detect_communities()
     summarize_all_communities()
 
-    # 8. Done
-    print("\n[8/8] Pipeline complete!")
+    # 9. Done
+    print("\n[9/9] Pipeline complete!")
     print("\n" + "=" * 60)
     print("✅ GraphRAG pipeline finished successfully!")
     print("=" * 60)

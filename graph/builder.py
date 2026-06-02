@@ -2,7 +2,7 @@ from graph.neo4j_client import get_client
 
 
 def build_file_nodes(parsed_files: list[dict]):
-    """Create File nodes and Function/Class nodes from AST output."""
+    """Create File nodes and Function/Class nodes from AST output with rich metadata."""
     client = get_client()
     for parsed in parsed_files:
         # Create File node
@@ -14,18 +14,36 @@ def build_file_nodes(parsed_files: list[dict]):
         for node in parsed["nodes"]:
             label = _node_type_to_label(node["type"])
 
-            # Create Function/Class node
+            # Create Function/Class node with rich testing metadata
             client.run(f"""
                 MERGE (n:{label} {{name: $name, file: $file}})
                 SET n.start_line = $start_line,
                     n.end_line = $end_line,
-                    n.raw_code = $raw_code
+                    n.raw_code = $raw_code,
+                    n.visibility = $visibility,
+                    n.is_async = $is_async,
+                    n.class_name = $class_name,
+                    n.docstring = $docstring,
+                    n.inputs = $inputs,
+                    n.output = $output,
+                    n.raises = $raises,
+                    n.complexity = $complexity,
+                    n.annotations = $annotations
             """, {
                 "name": node["name"],
                 "file": node["file"],
                 "start_line": node["start_line"],
                 "end_line": node["end_line"],
-                "raw_code": node.get("raw_code", "")[:1000],
+                "raw_code": node.get("raw_code", "")[:2000],
+                "visibility": node.get("visibility", "public"),
+                "is_async": node.get("is_async", False),
+                "class_name": node.get("class_name", None),
+                "docstring": node.get("docstring", ""),
+                "inputs": node.get("inputs", "[]"),
+                "output": node.get("output", ""),
+                "raises": node.get("raises", "[]"),
+                "complexity": node.get("complexity", 0),
+                "annotations": node.get("annotations", "[]"),
             })
 
             # CONTAINS edge: File -> Function
