@@ -44,6 +44,11 @@ class CodeChangeHandler(FileSystemEventHandler):
             changed_files = [p["file"] for p in parsed]
             from embeddings.chroma_client import embed_nodes_for_files
             embed_nodes_for_files(changed_files)
+            
+            # Incrementally update rich testing specs for modified files
+            from extractors.testing_enricher import enrich_functions_for_files
+            enrich_functions_for_files(changed_files)
+            
             print(f"[Watcher] Re-indexed: {changed_files}")
 
 
