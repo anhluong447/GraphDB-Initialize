@@ -10,8 +10,8 @@ services:
       NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
       NEO4J_dbms_security_procedures_unrestricted: "apoc.*,gds.*"
     volumes:
-      - ./data/${PROJECT_NAME}/neo4j/data:/data
-      - ./data/${PROJECT_NAME}/neo4j/logs:/logs
+      - ${NEO4J_DATA_DIR:-./.graphrag_data/neo4j/data}:/data
+      - ${NEO4J_LOGS_DIR:-./.graphrag_data/neo4j/logs}:/logs
     tmpfs:
       - /var/lib/neo4j/run
 

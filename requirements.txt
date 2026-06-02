@@ -20,7 +20,6 @@ chromadb
 networkx
 igraph
 leidenalg
-cdlib
 
 # API
 fastapi

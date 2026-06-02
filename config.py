@@ -12,6 +12,12 @@ if not CODEBASE_PATH:
     CODEBASE_PATH = os.path.join(CODEBASE_BASE_DIR, PROJECT_NAME)
 CODEBASE_PATH = CODEBASE_PATH.replace("\\", "/")
 
+# GraphRAG data directory — stored inside the target codebase
+GRAPHRAG_DATA_DIR = os.getenv("GRAPHRAG_DATA_DIR")
+if not GRAPHRAG_DATA_DIR:
+    GRAPHRAG_DATA_DIR = os.path.join(CODEBASE_PATH, ".graphrag_data")
+GRAPHRAG_DATA_DIR = GRAPHRAG_DATA_DIR.replace("\\", "/")
+
 # Supported languages for AST parsing
 SUPPORTED_LANGUAGES = {
     ".py": "python",
@@ -37,11 +43,18 @@ NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "graphrag123")
 
+# Neo4j data directories (for Docker volume mounts)
+NEO4J_DATA_DIR = os.path.join(GRAPHRAG_DATA_DIR, "neo4j", "data").replace("\\", "/")
+NEO4J_LOGS_DIR = os.path.join(GRAPHRAG_DATA_DIR, "neo4j", "logs").replace("\\", "/")
+
 # ChromaDB
 CHROMA_PATH = os.getenv("CHROMA_PATH")
 if not CHROMA_PATH:
-    CHROMA_PATH = f"./data/{PROJECT_NAME}/chroma_db"
+    CHROMA_PATH = os.path.join(GRAPHRAG_DATA_DIR, "chromadb")
 CHROMA_PATH = CHROMA_PATH.replace("\\", "/")
+
+# Sync state file for incremental updates
+SYNC_STATE_PATH = os.path.join(GRAPHRAG_DATA_DIR, "sync_state.json").replace("\\", "/")
 
 # GitHub (optional)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")

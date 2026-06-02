@@ -1,6 +1,7 @@
 venv/
 chroma_db/
 data/
+.graphrag_data/
 __pycache__/
 *.pyc
 .env
