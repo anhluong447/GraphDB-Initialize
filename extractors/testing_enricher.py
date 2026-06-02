@@ -122,10 +122,11 @@ def enrich_all_functions(batch_size: int = 8):
     """
     client = get_client()
 
-    # Only enrich functions that have raw_code and file (user-defined, not placeholder nodes)
+    # Only enrich functions that have raw_code and file, and haven't been enriched yet (resumable)
     result = client.run("""
         MATCH (n:Function)
         WHERE n.file IS NOT NULL AND n.raw_code IS NOT NULL AND size(n.raw_code) > 50
+          AND n.how_it_works IS NULL
         RETURN n.name as name, n.file as file, n.raw_code as raw_code,
                n.visibility as visibility, n.is_async as is_async,
                n.class_name as class_name, n.docstring as docstring,
