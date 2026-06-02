@@ -4,7 +4,13 @@ from graph.neo4j_client import get_client
 def build_file_nodes(parsed_files: list[dict]):
     """Create File nodes and Function/Class nodes from AST output with rich metadata."""
     client = get_client()
-    for parsed in parsed_files:
+    total_files = len(parsed_files)
+    print(f"[Builder] Starting database ingestion for {total_files} parsed files...")
+    
+    for idx, parsed in enumerate(parsed_files, 1):
+        if idx % 20 == 0 or idx == total_files:
+            print(f"[Builder] Processing file {idx}/{total_files}...")
+            
         # Create File node
         client.run("""
             MERGE (f:File {path: $path})
