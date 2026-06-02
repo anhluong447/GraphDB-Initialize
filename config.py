@@ -3,8 +3,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+PROJECT_NAME = os.getenv("PROJECT_NAME", "A20-App-083")
+CODEBASE_BASE_DIR = os.getenv("CODEBASE_BASE_DIR", "D:/GraphRAG/demo_project")
+
 # Target project to index
-CODEBASE_PATH = os.getenv("CODEBASE_PATH", "./demo_project/A20-App-083")
+CODEBASE_PATH = os.getenv("CODEBASE_PATH")
+if not CODEBASE_PATH:
+    CODEBASE_PATH = os.path.join(CODEBASE_BASE_DIR, PROJECT_NAME)
+CODEBASE_PATH = CODEBASE_PATH.replace("\\", "/")
 
 # Supported languages for AST parsing
 SUPPORTED_LANGUAGES = {
@@ -32,7 +38,10 @@ NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "graphrag123")
 
 # ChromaDB
-CHROMA_PATH = os.getenv("CHROMA_PATH", "./chroma_db")
+CHROMA_PATH = os.getenv("CHROMA_PATH")
+if not CHROMA_PATH:
+    CHROMA_PATH = f"./data/{PROJECT_NAME}/chroma_db"
+CHROMA_PATH = CHROMA_PATH.replace("\\", "/")
 
 # GitHub (optional)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
