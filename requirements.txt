@@ -9,6 +9,7 @@ python-dotenv
 
 # LLM & Embeddings (via OpenRouter)
 openai
+json-repair
 
 # Graph DB
 neo4j

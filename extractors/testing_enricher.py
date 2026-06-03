@@ -101,8 +101,8 @@ def _enrich_single_function(func: dict, retries: int = 2) -> dict | None:
                 return None
 
             raw = content.strip()
-            raw = raw.replace("```json", "").replace("```", "").strip()
-            result = json.loads(raw)
+            from extractors.llm_extractor import clean_and_parse_json
+            result = clean_and_parse_json(raw)
             result["_name"] = func["name"]
             result["_file"] = func["file"]
             return result
@@ -151,11 +151,12 @@ def _parse_test_recommendations(raw) -> str:
         raw.setdefault("type", "test_case")
         return json.dumps([raw])
     elif isinstance(raw, str):
-        # Try to parse as JSON
+        # Try to parse as JSON using json_repair
         try:
-            parsed = json.loads(raw)
+            import json_repair
+            parsed = json_repair.loads(raw)
             return _parse_test_recommendations(parsed)
-        except (json.JSONDecodeError, TypeError):
+        except Exception:
             if raw.strip():
                 return json.dumps([{"type": "note", "description": raw}])
             return "[]"

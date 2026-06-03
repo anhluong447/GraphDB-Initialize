@@ -37,44 +37,29 @@ Chunk to analyze:
 
 
 def clean_and_parse_json(raw_text: str) -> dict:
-    """Clean and parse JSON from LLM output, handling common issues like markdown wrappers,
-    conversational leading/trailing text, and unescaped newline control characters inside strings.
-    """
+    """Clean and parse JSON from LLM output using json_repair to handle malformed JSON syntax."""
+    import json_repair
     raw_text = raw_text.strip()
-    
-    # 1. Try to extract JSON structure between first '{' and last '}'
+
+    try:
+        # Try direct repair and load
+        return json_repair.loads(raw_text)
+    except Exception:
+        pass
+
+    # Extract content between first '{' and last '}'
     start_idx = raw_text.find('{')
     end_idx = raw_text.rfind('}')
     if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-        raw_text = raw_text[start_idx:end_idx + 1]
-        
-    # 2. Fix unescaped control characters (newlines, tabs) inside JSON string values
-    in_string = False
-    escape = False
-    chars = []
-    for char in raw_text:
-        if char == '"' and not escape:
-            in_string = not in_string
-            chars.append(char)
-        elif in_string:
-            if char == '\n':
-                chars.append('\\n')
-            elif char == '\r':
-                chars.append('\\r')
-            elif char == '\t':
-                chars.append('\\t')
-            else:
-                chars.append(char)
-        else:
-            chars.append(char)
-            
-        if char == '\\' and not escape:
-            escape = True
-        else:
-            escape = False
-            
-    clean_text = "".join(chars)
-    return json.loads(clean_text)
+        cropped = raw_text[start_idx:end_idx + 1]
+        try:
+            return json_repair.loads(cropped)
+        except Exception:
+            pass
+
+    # Final fallback: strip markdown blocks and try to parse
+    clean_text = raw_text.replace("```json", "").replace("```", "").strip()
+    return json_repair.loads(clean_text)
 
 
 def extract_entities_from_chunk(chunk_text: str, chunk_meta: dict, retries: int = 2) -> dict:
