@@ -49,6 +49,11 @@ start "GraphRAG Frontend Client" cmd /k "npm run dev --prefix visualization/fron
 echo [4/4] Starting File Watcher (Incremental Sync) in a new window...
 start "GraphRAG File Watcher" cmd /k "%PYTHON_CMD% updater\watcher.py"
 
+:: 6. Automatically open web dashboard in default browser
+timeout /t 3 > nul
+echo Opening browser dashboard...
+start http://localhost:5173
+
 echo.
 echo ===================================================
 echo   All services have been launched!
