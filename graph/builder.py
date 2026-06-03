@@ -26,7 +26,7 @@ def build_file_nodes(parsed_files: list[dict]):
                 MERGE (n:{label} {{name: $name, file: $file}})
                 SET n.start_line = $start_line,
                     n.end_line = $end_line,
-                    n.raw_code = $raw_code,
+                    n.anchor = $anchor,
                     n.visibility = $visibility,
                     n.is_async = $is_async,
                     n.class_name = $class_name,
@@ -41,7 +41,7 @@ def build_file_nodes(parsed_files: list[dict]):
                 "file": node["file"],
                 "start_line": node["start_line"],
                 "end_line": node["end_line"],
-                "raw_code": node.get("raw_code", "")[:2000],
+                "anchor": node.get("anchor", ""),
                 "visibility": node.get("visibility", "public"),
                 "is_async": node.get("is_async", False),
                 "class_name": node.get("class_name", None),

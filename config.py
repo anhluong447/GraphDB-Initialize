@@ -47,6 +47,7 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 # Model IDs on OpenRouter
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek/deepseek-v4-flash")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-large")
+EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "512"))
 
 # Neo4j
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")

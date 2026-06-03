@@ -106,6 +106,7 @@ def _extract_nodes(node, source_bytes: bytes, file_path: str, lang: str, result:
         else:
             name = "anonymous"
         raw_code = source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="ignore")
+        first_line = raw_code.splitlines()[0].strip() if raw_code else ""
 
         # Extract function calls inside this node
         calls = _extract_calls(node, source_bytes)
@@ -128,7 +129,7 @@ def _extract_nodes(node, source_bytes: bytes, file_path: str, lang: str, result:
             "file": file_path,
             "start_line": node.start_point[0] + 1,
             "end_line": node.end_point[0] + 1,
-            "raw_code": raw_code[:2000],  # limit to 2000 chars
+            "anchor": first_line,
             "calls": calls,
             "parent": parent_class,
             # ── New rich properties ──

@@ -172,17 +172,18 @@ def _parse_test_recommendations(raw) -> str:
 
 def enrich_all_functions(batch_size: int = 8):
     """
-    Query all Function nodes from Neo4j that have raw_code (user-defined functions),
+    Query all Function nodes from Neo4j that have coordinates,
     enrich them with LLM-generated test specs, and write back to Neo4j.
     """
     client = get_client()
 
-    # Only enrich functions that have raw_code and file, and haven't been enriched yet (resumable)
+    # Only enrich functions that have coordinates and file, and haven't been enriched yet (resumable)
     result = client.run("""
         MATCH (n:Function)
-        WHERE n.file IS NOT NULL AND n.raw_code IS NOT NULL AND size(n.raw_code) > 50
+        WHERE n.file IS NOT NULL AND n.start_line IS NOT NULL
           AND n.how_it_works IS NULL
-        RETURN n.name as name, n.file as file, n.raw_code as raw_code,
+        RETURN n.name as name, n.file as file, n.start_line as start_line,
+               n.end_line as end_line, n.anchor as anchor,
                n.visibility as visibility, n.is_async as is_async,
                n.class_name as class_name, n.docstring as docstring,
                n.inputs as inputs, n.output as output,
@@ -190,7 +191,12 @@ def enrich_all_functions(batch_size: int = 8):
                n.annotations as annotations
     """)
 
-    functions = [dict(r) for r in result]
+    functions = []
+    for r in result:
+        f = dict(r)
+        f["raw_code"] = client.read_node_code(f)
+        if len(f.get("raw_code", "").strip()) > 50:
+            functions.append(f)
 
     if not functions:
         print("[Enricher] No enrichable functions found.")
@@ -258,8 +264,9 @@ def enrich_functions_for_files(file_paths: list[str], batch_size: int = 4):
 
     result = client.run("""
         MATCH (n:Function)
-        WHERE n.file IN $files AND n.raw_code IS NOT NULL AND size(n.raw_code) > 50
-        RETURN n.name as name, n.file as file, n.raw_code as raw_code,
+        WHERE n.file IN $files AND n.start_line IS NOT NULL
+        RETURN n.name as name, n.file as file, n.start_line as start_line,
+               n.end_line as end_line, n.anchor as anchor,
                n.visibility as visibility, n.is_async as is_async,
                n.class_name as class_name, n.docstring as docstring,
                n.inputs as inputs, n.output as output,
@@ -267,7 +274,12 @@ def enrich_functions_for_files(file_paths: list[str], batch_size: int = 4):
                n.annotations as annotations
     """, {"files": file_paths})
 
-    functions = [dict(r) for r in result]
+    functions = []
+    for r in result:
+        f = dict(r)
+        f["raw_code"] = client.read_node_code(f)
+        if len(f.get("raw_code", "").strip()) > 50:
+            functions.append(f)
 
     if not functions:
         return

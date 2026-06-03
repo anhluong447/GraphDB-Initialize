@@ -21,17 +21,67 @@ HOOK_SCRIPT = """#!/bin/bash
 
 GRAPHRAG_PATH="{graphrag_path}"
 cd "$GRAPHRAG_PATH" && python -c "
+import git
+import os
+from config import CODEBASE_PATH
+from updater.git_hook import update_changed_files
 from parsers.git_parser import parse_git_history
-from extractors.llm_extractor import extract_from_commit
 from graph.builder import build_git_nodes
 
+repo = git.Repo(CODEBASE_PATH)
+latest_commit = repo.head.commit
+changed_files = [os.path.join(CODEBASE_PATH, f).replace(os.sep, '/') for f in latest_commit.stats.files.keys()]
+
+# Update positions and nodes for changed files
+update_changed_files(changed_files)
+
+# Update git nodes
 commits = parse_git_history(max_commits=1)
 if commits:
-    extracted = [extract_from_commit(c) for c in commits]
     build_git_nodes(commits)
     print('GraphRAG: Git graph updated.')
 " &
 """
+
+
+def update_changed_files(changed_files: list[str]):
+    """Re-parse and update coordinates/embeddings for changed files."""
+    from parsers.ast_parser import parse_file
+    from graph.builder import build_file_nodes
+    from graph.neo4j_client import get_client
+    from embeddings.chroma_client import collection, embed_nodes_for_files
+    from extractors.testing_enricher import enrich_functions_for_files
+    
+    client = get_client()
+    for f in changed_files:
+        f = f.replace("\\", "/")
+        if not os.path.exists(f):
+            # Clean up deleted files
+            print(f"[GitHook] Cleaning up deleted file: {f}")
+            client.run("MATCH (n) WHERE n.file = $file AND (n:Function OR n:Class) DETACH DELETE n", {"file": f})
+            client.run("MATCH (f:File {path: $path}) DETACH DELETE f", {"path": f})
+            try:
+                collection.delete(where={"file": f})
+            except Exception:
+                pass
+            continue
+
+        print(f"[GitHook] Updating changed file: {f}")
+        parsed = parse_file(f)
+        if parsed:
+            # Delete old AST nodes belonging to this file first
+            client.run("MATCH (n) WHERE n.file = $file AND (n:Function OR n:Class) DETACH DELETE n", {"file": f})
+            build_file_nodes([parsed])
+            
+            # Re-embed
+            try:
+                collection.delete(where={"file": f})
+            except Exception:
+                pass
+            embed_nodes_for_files([f])
+            
+            # Enrich
+            enrich_functions_for_files([f])
 
 
 def install_hook():

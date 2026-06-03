@@ -1,10 +1,13 @@
 import chromadb
 from embeddings.embedder import build_node_text, embed_text, embed_texts
 from graph.neo4j_client import get_client
-from config import CHROMA_PATH
+from config import CHROMA_PATH, EMBEDDING_DIMENSIONS
 
 chroma = chromadb.PersistentClient(path=CHROMA_PATH)
-collection = chroma.get_or_create_collection("graphrag_nodes")
+collection = chroma.get_or_create_collection(
+    "graphrag_nodes",
+    metadata={"hnsw:space": "cosine", "dimension": EMBEDDING_DIMENSIONS}
+)
 
 
 def embed_all_nodes():
@@ -51,7 +54,7 @@ def embed_all_nodes():
             if len(batch_ids) >= 50:
                 try:
                     vectors = embed_texts(batch_docs)
-                    collection.upsert(ids=batch_ids, documents=batch_docs,
+                    collection.upsert(ids=batch_ids,
                                       metadatas=batch_metas, embeddings=vectors)
                     total += len(batch_ids)
                     print(f"[Chroma] Embedded batch ({total} total)...")
@@ -62,7 +65,7 @@ def embed_all_nodes():
         if batch_ids:
             try:
                 vectors = embed_texts(batch_docs)
-                collection.upsert(ids=batch_ids, documents=batch_docs,
+                collection.upsert(ids=batch_ids,
                                   metadatas=batch_metas, embeddings=vectors)
                 total += len(batch_ids)
             except Exception as e:
@@ -127,7 +130,7 @@ def embed_nodes_for_files(file_paths: list[str]):
             if len(batch_ids) >= 50:
                 try:
                     vectors = embed_texts(batch_docs)
-                    collection.upsert(ids=batch_ids, documents=batch_docs,
+                    collection.upsert(ids=batch_ids,
                                       metadatas=batch_metas, embeddings=vectors)
                     total += len(batch_ids)
                     print(f"[Chroma] Embedded incremental batch ({total} total)...")
@@ -138,7 +141,7 @@ def embed_nodes_for_files(file_paths: list[str]):
         if batch_ids:
             try:
                 vectors = embed_texts(batch_docs)
-                collection.upsert(ids=batch_ids, documents=batch_docs,
+                collection.upsert(ids=batch_ids,
                                   metadatas=batch_metas, embeddings=vectors)
                 total += len(batch_ids)
             except Exception as e:
@@ -156,16 +159,32 @@ def semantic_search(query: str, top_k: int = 10, filter_type: str = None) -> lis
         query_embeddings=[query_vector],
         n_results=top_k,
         where=where,
-        include=["documents", "metadatas", "distances"],
+        include=["metadatas", "distances"],
     )
 
     output = []
     if results["ids"] and results["ids"][0]:
+        # Fetch actual node descriptions/details from Neo4j in a single query
+        names = [meta["name"] for meta in results["metadatas"][0] if meta.get("name")]
+        desc_map = {}
+        if names:
+            try:
+                client = get_client()
+                records = client.run(
+                    "MATCH (n) WHERE n.name IN $names RETURN n.name as name, coalesce(n.description, n.how_it_works, n.docstring, '') as description",
+                    {"names": names}
+                )
+                desc_map = {r["name"]: r["description"] for r in records}
+            except Exception as e:
+                print(f"[Chroma] Warning: failed to fetch node descriptions from Neo4j: {e}")
+
         for i in range(len(results["ids"][0])):
+            meta = results["metadatas"][0][i]
+            name = meta.get("name", "")
             output.append({
                 "id": results["ids"][0][i],
-                "document": results["documents"][0][i],
-                "metadata": results["metadatas"][0][i],
+                "document": desc_map.get(name, ""),
+                "metadata": meta,
                 "score": 1 - results["distances"][0][i],
             })
     return output

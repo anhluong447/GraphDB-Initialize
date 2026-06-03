@@ -121,6 +121,7 @@ def get_node_detail(name: str) -> dict:
         OPTIONAL MATCH (n)-[r]->(neighbor)
         OPTIONAL MATCH (caller)-[r2]->(n)
         RETURN n,
+               labels(n) as labels,
                collect(DISTINCT {type: type(r), target: neighbor.name}) as outgoing,
                collect(DISTINCT {type: type(r2), source: caller.name}) as incoming
         LIMIT 1
@@ -130,8 +131,13 @@ def get_node_detail(name: str) -> dict:
         return {}
 
     record = result[0]
+    node_dict = dict(record["n"])
+    labels = record.get("labels", [])
+    if any(l in ["Function", "Class"] for l in labels):
+        node_dict["raw_code"] = client.read_node_code(node_dict)
+
     return {
-        "node": dict(record["n"]),
+        "node": node_dict,
         "outgoing": record["outgoing"],
         "incoming": record["incoming"],
     }

@@ -87,8 +87,14 @@ def _wait_for_neo4j(timeout=60):
     return False
 
 
+_docker_started = False
+
+
 def _start_docker():
     """Start Docker containers with env vars for Neo4j volumes."""
+    global _docker_started
+    if _docker_started:
+        return
     env = os.environ.copy()
     env["NEO4J_DATA_DIR"] = NEO4J_DATA_DIR
     env["NEO4J_LOGS_DIR"] = NEO4J_LOGS_DIR
@@ -108,6 +114,7 @@ def _start_docker():
         print("  ⚠ Could not start Docker. Make sure Neo4j is running manually.")
 
     _wait_for_neo4j()
+    _docker_started = True
 
 
 def _is_supported_file(file_path: str) -> bool:

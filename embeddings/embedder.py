@@ -1,5 +1,5 @@
 import openai
-from config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, EMBEDDING_MODEL
+from config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, EMBEDDING_MODEL, EMBEDDING_DIMENSIONS
 from graph.neo4j_client import get_client
 
 openai_client = openai.OpenAI(
@@ -15,8 +15,10 @@ def build_node_text(node_record: dict, relations_dict: dict = None) -> str:
     """
     name = node_record.get("name", "")
     node_type = node_record.get("type", "")
-    description = node_record.get("description", "")
-    raw_code = node_record.get("raw_code", "")[:500]
+    description = node_record.get("description", "") or node_record.get("docstring", "")
+    how_it_works = node_record.get("how_it_works", "")
+    input_spec = node_record.get("input_spec", "")
+    output_spec = node_record.get("output_spec", "")
 
     if relations_dict is not None:
         rel_info = relations_dict.get(name, {"outgoing": [], "incoming": []})
@@ -47,9 +49,11 @@ def build_node_text(node_record: dict, relations_dict: dict = None) -> str:
     text = f"""
 {node_type}: {name}
 Description: {description}
+How it works: {how_it_works}
+Inputs: {input_spec}
+Outputs: {output_spec}
 Outgoing relations: {', '.join(outgoing) if outgoing else 'none'}
 Incoming relations: {', '.join(incoming) if incoming else 'none'}
-Code preview: {raw_code}
 """.strip()
 
     return text
@@ -60,6 +64,7 @@ def embed_text(text: str) -> list[float]:
     response = openai_client.embeddings.create(
         model=EMBEDDING_MODEL,
         input=text[:8000],
+        dimensions=EMBEDDING_DIMENSIONS,
     )
     return response.data[0].embedding
 
@@ -73,5 +78,6 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     response = openai_client.embeddings.create(
         model=EMBEDDING_MODEL,
         input=truncated,
+        dimensions=EMBEDDING_DIMENSIONS,
     )
     return [item.embedding for item in response.data]

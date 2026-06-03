@@ -60,6 +60,83 @@ class Neo4jClient:
             functions.append(fn)
         return functions
 
+    def read_node_code(self, node: dict) -> str:
+        """
+        Read source code of a node from file.
+        If start_line is stale (anchor doesn't match), search and update Neo4j.
+        
+        Args:
+            node: dict containing file, start_line, end_line, anchor, name
+        Returns:
+            Source code of that node
+        """
+        import os
+        file_path = node.get("file")
+        start_line = node.get("start_line")
+        end_line = node.get("end_line")
+        anchor = node.get("anchor", "")
+        
+        if not file_path:
+            return ""
+            
+        # Try to resolve relative path if not absolute
+        if not os.path.isabs(file_path):
+            from config import CODEBASE_PATH
+            alt_path = os.path.abspath(os.path.join(CODEBASE_PATH, file_path)).replace("\\", "/")
+            if os.path.exists(alt_path):
+                file_path = alt_path
+
+        if not os.path.exists(file_path):
+            return ""
+
+        # Backward compatibility for old DB entries that only have raw_code
+        if start_line is None or end_line is None:
+            return node.get("raw_code", "")
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except Exception:
+            return ""
+
+        # Check if anchor matches
+        actual_line = lines[start_line - 1].strip() if 1 <= start_line <= len(lines) else ""
+        
+        if actual_line == anchor:
+            # Line coordinates are correct, read normally
+            return "".join(lines[start_line - 1 : end_line])
+
+        # Anchor does not match — coordinates are stale, let's find the anchor
+        new_start = None
+        for i, line in enumerate(lines):
+            if line.strip() == anchor:
+                new_start = i + 1  # 1-indexed
+                break
+
+        if new_start is None:
+            # Anchor not found (e.g. function deleted or renamed)
+            return ""
+
+        # Calculate new end_line using the original offset
+        offset = end_line - start_line
+        new_end = new_start + offset
+
+        # Update Neo4j with the correct coordinates
+        self.run(
+            """
+            MATCH (n {name: $name, file: $file})
+            SET n.start_line = $new_start, n.end_line = $new_end
+            """,
+            {
+                "name": node.get("name"),
+                "file": node.get("file"),
+                "new_start": new_start,
+                "new_end": new_end
+            }
+        )
+
+        return "".join(lines[new_start - 1 : new_end])
+
 
 # Singleton
 _client = None
