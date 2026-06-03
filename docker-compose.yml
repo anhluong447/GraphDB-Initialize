@@ -9,6 +9,13 @@ services:
       NEO4J_AUTH: neo4j/graphrag123
       NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
       NEO4J_dbms_security_procedures_unrestricted: "apoc.*,gds.*"
+      # Optimize disk space (transaction logs)
+      NEO4J_db_tx__log_rotation_size: "10M"
+      NEO4J_db_tx__log_rotation_retention__policy: "1 files"
+      # Limit RAM usage
+      NEO4J_server_memory_heap_initial__size: "128M"
+      NEO4J_server_memory_heap_max__size: "512M"
+      NEO4J_server_memory_pagecache_size: "128M"
     volumes:
       - ${NEO4J_DATA_DIR:-./.graphrag_data/neo4j/data}:/data
       - ${NEO4J_LOGS_DIR:-./.graphrag_data/neo4j/logs}:/logs
