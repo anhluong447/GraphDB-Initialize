@@ -9,37 +9,40 @@ import tree_sitter_javascript as tsjavascript
 import tree_sitter_typescript as tstypescript
 from config import CODEBASE_PATH, SUPPORTED_LANGUAGES, IGNORE_DIRS
 
-# Python stdlib module names (major modules, used for is_stdlib detection)
-_PYTHON_STDLIB = {
-    "abc", "aifc", "argparse", "array", "ast", "asyncio", "atexit", "base64",
-    "binascii", "bisect", "builtins", "bz2", "calendar", "cgi", "cgitb",
-    "cmath", "cmd", "code", "codecs", "collections", "colorsys", "compileall",
-    "concurrent", "configparser", "contextlib", "contextvars", "copy", "copyreg",
-    "cProfile", "csv", "ctypes", "curses", "dataclasses", "datetime", "dbm",
-    "decimal", "difflib", "dis", "distutils", "doctest", "email", "encodings",
-    "enum", "errno", "faulthandler", "fcntl", "filecmp", "fileinput", "fnmatch",
-    "fractions", "ftplib", "functools", "gc", "getopt", "getpass", "gettext",
-    "glob", "grp", "gzip", "hashlib", "heapq", "hmac", "html", "http",
-    "idlelib", "imaplib", "imghdr", "imp", "importlib", "inspect", "io",
-    "ipaddress", "itertools", "json", "keyword", "lib2to3", "linecache",
-    "locale", "logging", "lzma", "mailbox", "mailcap", "marshal", "math",
-    "mimetypes", "mmap", "modulefinder", "multiprocessing", "netrc", "nis",
-    "nntplib", "numbers", "operator", "optparse", "os", "ossaudiodev",
-    "pathlib", "pdb", "pickle", "pickletools", "pipes", "pkgutil", "platform",
-    "plistlib", "poplib", "posixpath", "pprint", "profile", "pstats", "pty",
-    "pwd", "py_compile", "pyclbr", "pydoc", "queue", "quopri", "random",
-    "re", "readline", "reprlib", "resource", "rlcompleter", "runpy", "sched",
-    "secrets", "select", "selectors", "shelve", "shlex", "shutil", "signal",
-    "site", "smtpd", "smtplib", "sndhdr", "socket", "socketserver", "sqlite3",
-    "ssl", "stat", "statistics", "string", "stringprep", "struct", "subprocess",
-    "sunau", "symtable", "sys", "sysconfig", "syslog", "tabnanny", "tarfile",
-    "telnetlib", "tempfile", "termios", "test", "textwrap", "threading", "time",
-    "timeit", "tkinter", "token", "tokenize", "tomllib", "trace", "traceback",
-    "tracemalloc", "tty", "turtle", "turtledemo", "types", "typing",
-    "unicodedata", "unittest", "urllib", "uuid", "venv", "warnings", "wave",
-    "weakref", "webbrowser", "winreg", "winsound", "wsgiref", "xdrlib",
-    "xml", "xmlrpc", "zipapp", "zipfile", "zipimport", "zlib", "_thread",
-}
+# Python stdlib module names (used for is_stdlib detection)
+try:
+    _PYTHON_STDLIB = set(sys.stdlib_module_names)
+except AttributeError:
+    _PYTHON_STDLIB = {
+        "abc", "aifc", "argparse", "array", "ast", "asyncio", "atexit", "base64",
+        "binascii", "bisect", "builtins", "bz2", "calendar", "cgi", "cgitb",
+        "cmath", "cmd", "code", "codecs", "collections", "colorsys", "compileall",
+        "concurrent", "configparser", "contextlib", "contextvars", "copy", "copyreg",
+        "cProfile", "csv", "ctypes", "curses", "dataclasses", "datetime", "dbm",
+        "decimal", "difflib", "dis", "distutils", "doctest", "email", "encodings",
+        "enum", "errno", "faulthandler", "fcntl", "filecmp", "fileinput", "fnmatch",
+        "fractions", "ftplib", "functools", "gc", "getopt", "getpass", "gettext",
+        "glob", "grp", "gzip", "hashlib", "heapq", "hmac", "html", "http",
+        "idlelib", "imaplib", "imghdr", "imp", "importlib", "inspect", "io",
+        "ipaddress", "itertools", "json", "keyword", "lib2to3", "linecache",
+        "locale", "logging", "lzma", "mailbox", "mailcap", "marshal", "math",
+        "mimetypes", "mmap", "modulefinder", "multiprocessing", "netrc", "nis",
+        "nntplib", "numbers", "operator", "optparse", "os", "ossaudiodev",
+        "pathlib", "pdb", "pickle", "pickletools", "pipes", "pkgutil", "platform",
+        "plistlib", "poplib", "posixpath", "pprint", "profile", "pstats", "pty",
+        "pwd", "py_compile", "pyclbr", "pydoc", "queue", "quopri", "random",
+        "re", "readline", "reprlib", "resource", "rlcompleter", "runpy", "sched",
+        "secrets", "select", "selectors", "shelve", "shlex", "shutil", "signal",
+        "site", "smtpd", "smtplib", "sndhdr", "socket", "socketserver", "sqlite3",
+        "ssl", "stat", "statistics", "string", "stringprep", "struct", "subprocess",
+        "sunau", "symtable", "sys", "sysconfig", "syslog", "tabnanny", "tarfile",
+        "telnetlib", "tempfile", "termios", "test", "textwrap", "threading", "time",
+        "timeit", "tkinter", "token", "tokenize", "tomllib", "trace", "traceback",
+        "tracemalloc", "tty", "turtle", "turtledemo", "types", "typing",
+        "unicodedata", "unittest", "urllib", "uuid", "venv", "warnings", "wave",
+        "weakref", "webbrowser", "winreg", "winsound", "wsgiref", "xdrlib",
+        "xml", "xmlrpc", "zipapp", "zipfile", "zipimport", "zlib", "_thread",
+    }
 
 PY_LANGUAGE = Language(tspython.language())
 JS_LANGUAGE = Language(tsjavascript.language())
