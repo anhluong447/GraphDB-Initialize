@@ -577,14 +577,22 @@ def run_status():
         from graph.neo4j_client import get_client
         client = get_client()
 
-        stats = client.run("""
-            MATCH (f:Function) WITH count(f) as total_functions
-            MATCH (f2:Function) WHERE f2.how_it_works IS NOT NULL
+        stats_list = client.run("""
+            OPTIONAL MATCH (f:Function)
+            WITH count(f) as total_functions
+            OPTIONAL MATCH (f2:Function) WHERE f2.how_it_works IS NOT NULL
             WITH total_functions, count(f2) as enriched_functions
-            OPTIONAL MATCH (m:Module) WITH total_functions, enriched_functions, count(m) as total_modules
-            OPTIONAL MATCH (c:Commit) WITH total_functions, enriched_functions, total_modules, count(c) as total_commits
-            RETURN total_functions, enriched_functions, total_modules, total_commits
-        """)[0]
+            OPTIONAL MATCH (m:Module)
+            WITH total_functions, enriched_functions, count(m) as total_modules
+            OPTIONAL MATCH (c:Commit)
+            RETURN total_functions, enriched_functions, total_modules, count(c) as total_commits
+        """)
+        stats = stats_list[0] if stats_list else {
+            "total_functions": 0,
+            "enriched_functions": 0,
+            "total_modules": 0,
+            "total_commits": 0
+        }
 
         total = stats["total_functions"]
         enriched = stats["enriched_functions"]

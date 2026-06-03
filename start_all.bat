@@ -20,11 +20,11 @@ if exist ".\venv\Scripts\python.exe" (
     echo [GraphRAG] Warning: Virtual environment not found. Falling back to system 'python'.
 )
 
-:: 2. Check and Start Docker databases
+:: 2. Check and Start Docker databases (using Python config helper to bind correct volumes)
 echo [1/4] Starting Docker databases (Neo4j ^& Chroma)...
-docker compose up -d
+%PYTHON_CMD% -c "import os, sys; sys.path.append(os.getcwd()); import initialize_graph; initialize_graph._start_docker()"
 if %ERRORLEVEL% neq 0 (
-    echo Error: Failed to start Docker compose. Ensure Docker Desktop is running.
+    echo Error: Failed to start Docker databases.
     pause
     exit /b %ERRORLEVEL%
 )
