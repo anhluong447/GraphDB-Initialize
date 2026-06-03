@@ -62,35 +62,43 @@ def clean_and_parse_json(raw_text: str) -> dict:
     return json_repair.loads(clean_text)
 
 
-def extract_entities_from_chunk(chunk_text: str, chunk_meta: dict, retries: int = 2) -> dict:
-    """Call LLM to extract entities and relations from a chunk."""
-    for attempt in range(retries + 1):
+def extract_entities_from_chunk(chunk_text: str, chunk_meta: dict, retries: int = 4) -> dict:
+    """Call LLM to extract entities and relations from a chunk with a self-correction retry loop."""
+    messages = [
+        {"role": "user", "content": EXTRACTION_PROMPT + chunk_text[:3000]}
+    ]
+
+    for attempt in range(retries):
         try:
             response = client.chat.completions.create(
                 model=LLM_MODEL,
                 max_tokens=4000,
-                messages=[{
-                    "role": "user",
-                    "content": EXTRACTION_PROMPT + chunk_text[:3000]
-                }]
+                messages=messages
             )
             content = response.choices[0].message.content
             if content is None:
-                if attempt < retries:
-                    time.sleep(1)
-                    continue
-                print(f"[Extractor] Empty response for {chunk_meta.get('file', '')}")
-                return {"entities": [], "relations": [], "source": chunk_meta}
-            
+                raise ValueError("Received empty response from LLM")
+
             result = clean_and_parse_json(content)
+            if not isinstance(result, dict) or "entities" not in result:
+                raise ValueError("Parsed JSON does not match expected schema (missing entities/relations)")
+
             result["source"] = chunk_meta
             return result
-        except (json.JSONDecodeError, Exception) as e:
-            if attempt < retries:
+        except Exception as e:
+            print(f"[Extractor] Attempt {attempt + 1} failed for {chunk_meta.get('file', '')}: {e}")
+            if attempt < retries - 1:
+                # Append incorrect response and error message for self-correction feedback
+                if 'content' in locals() and content:
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({
+                        "role": "user",
+                        "content": f"The previous response is invalid. Error: {e}. Please fix any JSON syntax errors (such as unescaped quotes or missing commas) and return ONLY valid JSON."
+                    })
                 time.sleep(1)
-                continue
-            print(f"[Extractor] Error for {chunk_meta.get('file', '')} after {attempt + 1} attempts: {e}")
-            return {"entities": [], "relations": [], "source": chunk_meta}
+            else:
+                print(f"[Extractor] Error for {chunk_meta.get('file', '')} after {retries} attempts. Skipping chunk.")
+
     return {"entities": [], "relations": [], "source": chunk_meta}
 
 

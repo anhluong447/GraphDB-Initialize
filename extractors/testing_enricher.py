@@ -69,8 +69,8 @@ RULES:
 """
 
 
-def _enrich_single_function(func: dict, retries: int = 2) -> dict | None:
-    """Call LLM to generate test specifications for a single function."""
+def _enrich_single_function(func: dict, retries: int = 4) -> dict | None:
+    """Call LLM to generate test specifications for a single function with self-correction retry loop."""
     prompt = ENRICHMENT_PROMPT.format(
         name=func.get("name", ""),
         file=func.get("file", ""),
@@ -86,38 +86,45 @@ def _enrich_single_function(func: dict, retries: int = 2) -> dict | None:
         raw_code=func.get("raw_code", "")[:3000],
     )
 
-    for attempt in range(retries + 1):
+    messages = [{"role": "user", "content": prompt}]
+
+    for attempt in range(retries):
         try:
             response = client_ai.chat.completions.create(
                 model=LLM_MODEL,
                 max_tokens=2000,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
             )
             content = response.choices[0].message.content
             if content is None:
-                if attempt < retries:
-                    time.sleep(1)
-                    continue
-                return None
+                raise ValueError("Received empty response from LLM")
 
             raw = content.strip()
             from extractors.llm_extractor import clean_and_parse_json
             result = clean_and_parse_json(raw)
+
+            # Schema validation
+            required_keys = ["how_it_works", "input_spec", "output_spec", "edge_cases", "test_recommendations"]
+            if not isinstance(result, dict) or not all(k in result for k in required_keys):
+                raise ValueError("Parsed JSON is missing required schema keys (how_it_works, input_spec, output_spec, edge_cases, test_recommendations)")
+
             result["_name"] = func["name"]
             result["_file"] = func["file"]
             return result
 
-        except json.JSONDecodeError:
-            if attempt < retries:
-                time.sleep(1)
-                continue
-            return None
         except Exception as e:
-            if attempt < retries:
+            print(f"[Enricher] Attempt {attempt + 1} failed for function {func.get('name', '?')}: {e}")
+            if attempt < retries - 1:
+                # Append incorrect response and error message for self-correction feedback
+                if 'content' in locals() and content:
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({
+                        "role": "user",
+                        "content": f"The previous response is invalid. Error: {e}. Please fix any JSON syntax errors or missing keys and return ONLY valid JSON matching the requested schema."
+                    })
                 time.sleep(1)
-                continue
-            print(f"[Enricher] Error for {func.get('name', '?')}: {e}")
-            return None
+            else:
+                print(f"[Enricher] Error for function {func.get('name', '?')} after {retries} attempts. Skipping.")
 
     return None
 
