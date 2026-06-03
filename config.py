@@ -6,15 +6,14 @@ load_dotenv()
 config_dir = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(config_dir, ".env"))
 
-PROJECT_NAME = os.getenv("PROJECT_NAME", "A20-App-083")
-CODEBASE_BASE_DIR = os.getenv("CODEBASE_BASE_DIR", "D:/GraphRAG/demo_project")
+PROJECT_NAME = os.getenv("PROJECT_NAME", "GraphRAG-Project")
 
-# Target project to index
+# Target project to index. By default, it is the parent folder of this tool.
 CODEBASE_PATH = os.getenv("CODEBASE_PATH")
 if not CODEBASE_PATH:
-    CODEBASE_PATH = os.path.join(CODEBASE_BASE_DIR, PROJECT_NAME)
+    CODEBASE_PATH = ".."
 
-# If it's a relative path, resolve it relative to the config file's directory
+# If it's a relative path, resolve it relative to this config file's directory
 if not os.path.isabs(CODEBASE_PATH):
     CODEBASE_PATH = os.path.abspath(os.path.join(config_dir, CODEBASE_PATH))
 
