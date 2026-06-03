@@ -36,6 +36,9 @@ SUPPORTED_LANGUAGES = {
 
 # Directories to skip during parsing
 IGNORE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".next", ".cursor", ".claude", ".codex", ".gemini", ".ai-log"}
+tool_dir_name = os.path.basename(config_dir)
+if tool_dir_name and os.path.abspath(CODEBASE_PATH) != os.path.abspath(config_dir):
+    IGNORE_DIRS.add(tool_dir_name)
 
 # OpenRouter API (used for both LLM and embeddings)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
