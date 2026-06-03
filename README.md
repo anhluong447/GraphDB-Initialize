@@ -9,19 +9,25 @@ An autonomous, zero-configuration Knowledge Graph builder and semantic search en
 1. **Zero-Configuration Isolation (Plug-and-Play)**:
    All database files, vector spaces, and sync status files are stored directly inside the target codebase's local hidden folder (`.graphrag_data/`). No centralized databases to manage or conflict.
    
-2. **Rich AST call-graph parser**:
+2. **Rich AST Call-Graph Parser**:
    Uses **Tree-Sitter** to parse Python, JavaScript, TypeScript, JSX, and TSX files. It extracts class/function syntax structures, docstrings, complexity, inputs, outputs, decorators, and builds exact function call relationships.
 
-3. **Dynamic Import & Dependency Analyzer**:
+3. **ChromaDB Storage & Dimension Optimization**:
+   Omit raw codebase source code strings from ChromaDB entirely to prevent database bloating. Uses an optimized 512-dimension vector embedding configuration. Search result descriptions are dynamically reconstructed on the fly using a single batched database lookup to Neo4j.
+
+4. **Dynamic Code Retrieval & Drift Recovery**:
+   Instead of cache-bloating Neo4j with full source code copies, it maps functions and classes to exact line coordinates and an `anchor` string fingerprint. The system loads code dynamically on-demand from disk, with an auto-recovery parser that updates coordinates in Neo4j if line numbers shift due to codebase edits.
+
+5. **Dynamic Import & Dependency Analyzer**:
    Tracks module import statements (`File -[:IMPORTS]-> Module`). Automatically detects Python standard library modules dynamically (using `sys.stdlib_module_names` in Python 3.10+ with local fallback) to cleanly categorize dependencies as *stdlib*, *external*, or *internal*.
 
-4. **Git Commit-to-Function Line Mapper**:
+6. **Git Commit-to-Function Line Mapper**:
    Tracks Git history, parses unified git diff hunks to retrieve exact line changes, and maps commits directly to the specific functions they modified (`Commit -[:CHANGED]-> Function`) using overlapping line ranges. Great for feeding Test Impact Analysis agents!
 
-5. **Self-Correction LLM Extraction Loop**:
+7. **Self-Correction LLM Extraction Loop**:
    Resolves common LLM JSON syntax errors by integrating `json-repair`. If parsing still fails or keys are missing, the system starts a self-correction feedback loop, feeding the incorrect text and error trace back to the LLM to rewrite the output (retrying up to 4 attempts).
 
-6. **Robust Startup Handshake**:
+8. **Robust Startup Handshake**:
    Uses connection polling (`_wait_for_neo4j()`) instead of static timeouts, ensuring that dockerized databases are fully initialized and Bolt handshake is ready before building indexes.
 
 ---

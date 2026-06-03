@@ -47,6 +47,7 @@ The system supports zero-configuration codebase-level isolation.
 - **Relations**: Scans function call syntax inside bodies to create `CALLS` relations between nodes.
 - **Dynamic Module Import Tracking**: Tree-Sitter parser extracts module-level import statements (`import X`, `from X import Y`, relative imports) and records `File -[:IMPORTS]-> Module` and `Function -[:USES_EXTERNAL]-> Module` relationships.
 - **Version-Aware Stdlib Detection**: Automatically detects Python standard library modules dynamically using `sys.stdlib_module_names` (for Python 3.10+), falling back to a static collection for older environments, ensuring highly accurate external vs standard library classification.
+- **Coordinate & Anchor Extraction**: To prevent database size bloat, raw source code is no longer stored in the graph database. Instead, the parser extracts the physical line coordinates (`start_line` / `end_line`) and the `anchor` (the first line of the function/class, stripped) to resolve the code dynamically.
 - **Rich Static Metadata Extraction**: For each function and class, the parser statically extracts:
   - `is_async` (boolean flag)
   - `visibility` (public, private, protected)
@@ -61,10 +62,12 @@ The system supports zero-configuration codebase-level isolation.
 Avoids rebuilding the graph from scratch on every change:
 - **File Watcher (`watcher.py`)**: A background service that listens to filesystem save events. It parses only the modified files and updates their AST nodes/relationships in Neo4j and ChromaDB instantly without calling LLMs.
 - **Git Line-Range Commit-to-Function Linking**: Scans commit history, parses unified git diff hunks to retrieve exact line changes, and maps commits directly to the specific functions they modified (`Commit -[:CHANGED]-> Function`) using overlapping line ranges.
+- **Automatic Coordinates Sync on Git Commit**: When a git commit occurs, the post-commit git hook triggers `update_changed_files()` to re-parse the modified files, update the function/class line coordinates, re-embed, and re-enrich functions.
 - **Bootstrapping Script (`initialize_graph.py`)**: Checks for changes, initializes database ports, creates indexes, links commits, and starts incremental parsing.
 
 ### 2.4 AI Testing Enricher (`extractors/testing_enricher.py`)
-- Queries all user-defined functions in Neo4j and uses the LLM to generate high-value testing specifications:
+- Queries user-defined functions in Neo4j (using `start_line IS NOT NULL` instead of checking for raw code availability) and dynamically retrieves the source code from the file on disk using the coordinate reader `read_node_code()`.
+- Uses the LLM to generate high-value testing specifications:
   - `how_it_works`: Clear plain English summary of logic, side effects, and dependencies.
   - `input_spec`: Valid ranges, boundaries, and type constraints for parameters.
   - `output_spec`: Detailed returns under various conditions (null, error, etc.).
@@ -78,14 +81,16 @@ Avoids rebuilding the graph from scratch on every change:
 ### 2.5 Semantic Extractor & Community Manager (`extractors/`, `community/`)
 - **LLM Extractor (`llm_extractor.py`)**: Leverages DeepSeek V4-Flash (via OpenRouter) to extract human-level abstractions (Concepts, Features, Risks, Decisions, Tasks) from raw code and commits.
   - Includes `json-repair` and the **LLM Self-Correction Feedback Loop** (4 retries) to fix malformed semantic outputs.
+- **ChromaDB Optimization**: Vector dimension space is optimized to 512 dimensions (using `EMBEDDING_DIMENSIONS` config) to improve search latency and accuracy. To minimize storage space and avoid raw code text duplication, raw `documents` are excluded from ChromaDB upserts entirely.
 - **Community Detector (`detector.py`)**: Clusters graph nodes into hierarchical communities using Neo4j APOC/Leiden algorithms.
 - **Community Summarizer (`summarizer.py`)**: Summarizes the role of each community. It automatically bypasses LLM summarization for small communities (< 3 nodes) to minimize token consumption and runtime, and upserts summaries to ChromaDB in batches.
 
 ### 2.6 Hybrid Query Engine (`query/engine.py`)
 Provides context for LLM answering:
 1. **Vector Stage**: Search ChromaDB for the closest code nodes, features, and community summaries.
-2. **Graph Stage**: Perform multi-hop Cypher queries in Neo4j starting from the vector matches to gather relational context (e.g. what calls what, what features depend on what code, and the detailed testing specifications of those nodes). Exposes `coalesce(neighbor.description, neighbor.how_it_works, neighbor.docstring)` to seamlessly fetch specifications for function nodes.
-3. **Synthesis Stage**: Merges the retrieved context and feeds it to DeepSeek V4-Flash to generate a final answer.
+2. **Dynamic Document Reconstruction**: For code nodes matched via vector search, the query engine dynamically retrieves their descriptions and functional documentation (`how_it_works`) from Neo4j in a single batched Cypher query to reconstruct the document context on the fly.
+3. **Graph Stage**: Perform multi-hop Cypher queries in Neo4j starting from the vector matches to gather relational context (e.g. what calls what, what features depend on what code, and the detailed testing specifications of those nodes). Exposes `coalesce(neighbor.description, neighbor.how_it_works, neighbor.docstring)` to seamlessly fetch specifications for function nodes.
+4. **Synthesis Stage**: Merges the retrieved context and feeds it to DeepSeek V4-Flash to generate a final answer.
 
 ### 2.7 Visualization & API (`visualization/`, `mcp/`)
 - **Backend API**: A FastAPI server exposing endpoints for graph queries, search, node details, and community graphs.
@@ -100,8 +105,8 @@ Provides context for LLM answering:
 Stores syntactic and semantic context for a function or method.
 - **`name`**: Function name.
 - **`file`**: File path where the function is defined.
-- **`start_line` / `end_line`**: Physical lines in code.
-- **`raw_code`**: Up to 2000 characters of the function's source code.
+- **`start_line` / `end_line`**: Physical lines in code (used for dynamic code loading).
+- **`anchor`**: Statically extracted first line of the function, stripped. Used as a fingerprint to detect shifted line numbers and auto-correct coordinates in Neo4j.
 - **`is_async`**: Boolean (true if async function).
 - **`visibility`**: `"public"`, `"private"`, or `"protected"`.
 - **`class_name`**: Name of the parent class (or null/blank if top-level).
@@ -122,7 +127,7 @@ Stores structural information about a class.
 - **`name`**: Class name.
 - **`file`**: File path.
 - **`start_line` / `end_line`**: Code bounds.
-- **`raw_code`**: Definition of the class.
+- **`anchor`**: First line of class definition (stripped). Used for coordinates sync.
 - **`visibility`**: `"public"` or `"private"`.
 - **`docstring`**: Statically extracted class docstring.
 - **`annotations`**: JSON array of class decorators.
