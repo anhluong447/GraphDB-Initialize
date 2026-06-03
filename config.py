@@ -47,6 +47,9 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-large")
 
 # Neo4j
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")
+import sys
+if sys.platform == "win32" and "localhost" in NEO4J_URI:
+    NEO4J_URI = NEO4J_URI.replace("localhost", "127.0.0.1")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "graphrag123")
 
