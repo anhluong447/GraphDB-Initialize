@@ -66,23 +66,48 @@ def _get_head_commit(repo_path: str) -> str | None:
         return None
 
 
+def _wait_for_neo4j(timeout=60):
+    """Wait for Neo4j to become fully responsive to Bolt connection requests."""
+    from neo4j import GraphDatabase
+    from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+    start_time = time.time()
+    print("  Connecting to Neo4j database", end="", flush=True)
+    while time.time() - start_time < timeout:
+        try:
+            driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+            with driver.session() as session:
+                session.run("RETURN 1").single()
+            driver.close()
+            print(" -> Connection successful! Neo4j is ready.")
+            return True
+        except Exception:
+            print(".", end="", flush=True)
+            time.sleep(2)
+    print("\n  ⚠ Warning: Neo4j did not respond within the timeout. Proceeding anyway...")
+    return False
+
+
 def _start_docker():
     """Start Docker containers with env vars for Neo4j volumes."""
     env = os.environ.copy()
     env["NEO4J_DATA_DIR"] = NEO4J_DATA_DIR
     env["NEO4J_LOGS_DIR"] = NEO4J_LOGS_DIR
 
+    started = False
     for cmd in [["docker-compose", "up", "-d"], ["docker", "compose", "up", "-d"]]:
         try:
-            subprocess.run(cmd, cwd=GRAPHRAG_ROOT, check=True, env=env)
-            print("  Waiting for Neo4j to be ready...")
-            time.sleep(10)
-            return
+            subprocess.run(cmd, cwd=GRAPHRAG_ROOT, check=True, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            started = True
+            break
         except FileNotFoundError:
             continue
         except Exception as e:
             print(f"  Warning: Docker command failed: {e}")
-    print("  ⚠ Could not start Docker. Make sure Neo4j is running manually.")
+
+    if not started:
+        print("  ⚠ Could not start Docker. Make sure Neo4j is running manually.")
+
+    _wait_for_neo4j()
 
 
 def _is_supported_file(file_path: str) -> bool:
