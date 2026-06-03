@@ -6,7 +6,7 @@ services:
       - "7474:7474"   # HTTP (Neo4j Browser)
       - "7687:7687"   # Bolt
     environment:
-      NEO4J_AUTH: neo4j/graphrag123
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-graphrag123}
       NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
       NEO4J_dbms_security_procedures_unrestricted: "apoc.*,gds.*"
       # Optimize disk space (transaction logs)

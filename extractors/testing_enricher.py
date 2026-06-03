@@ -50,7 +50,10 @@ Produce a JSON response with EXACTLY these keys:
   "input_spec": "For each parameter: valid ranges, types, constraints, nullable, edge values. Be specific.",
   "output_spec": "What is returned, under what conditions. Include None/null/error cases.",
   "edge_cases": ["list of specific edge case scenarios that could cause bugs or unexpected behavior"],
-  "test_recommendations": ["list of specific test cases to write, including: what to mock, what input to use, what output to assert, and why"]
+  "test_recommendations": [
+    {{"type": "mock", "target": "exact.import.path", "reason": "Why this must be mocked"}},
+    {{"type": "test_case", "name": "test_name", "path": "happy|error|edge", "description": "What to test and assert"}}
+  ]
 }}
 
 RULES:
@@ -58,6 +61,10 @@ RULES:
 - If the function interacts with a database, specify exactly what tables/collections and what mock data shape to use.
 - If the function calls external APIs, specify what to mock and what response shape to simulate.
 - If the function reads environment variables or config, list them explicitly.
+- CRITICAL: test_recommendations MUST be a JSON array. Each item MUST have a "type" field: either "mock" or "test_case".
+  - If "mock": include "target" (exact import path to mock) and "reason".
+  - If "test_case": include "name", "path" (happy/error/edge), and "description".
+  - Never return a plain string for test_recommendations.
 - Return ONLY valid JSON, no markdown.
 """
 
@@ -120,6 +127,39 @@ def _normalize_property(val) -> str:
     if isinstance(val, (dict, list)):
         return json.dumps(val)
     return str(val) if val is not None else ""
+
+
+def _parse_test_recommendations(raw) -> str:
+    """
+    Normalize test_recommendations to a consistent JSON array string.
+    Handles: JSON array, JSON object, plain string, or parse failure.
+    Each item should have: type (mock|test_case), and relevant fields.
+    """
+    if isinstance(raw, list):
+        # Already a list, validate items
+        normalized = []
+        for item in raw:
+            if isinstance(item, dict) and "type" in item:
+                normalized.append(item)
+            elif isinstance(item, str):
+                normalized.append({"type": "note", "description": item})
+            elif isinstance(item, dict):
+                item.setdefault("type", "test_case")
+                normalized.append(item)
+        return json.dumps(normalized)
+    elif isinstance(raw, dict):
+        raw.setdefault("type", "test_case")
+        return json.dumps([raw])
+    elif isinstance(raw, str):
+        # Try to parse as JSON
+        try:
+            parsed = json.loads(raw)
+            return _parse_test_recommendations(parsed)
+        except (json.JSONDecodeError, TypeError):
+            if raw.strip():
+                return json.dumps([{"type": "note", "description": raw}])
+            return "[]"
+    return "[]"
 
 
 def enrich_all_functions(batch_size: int = 8):
@@ -192,7 +232,7 @@ def enrich_all_functions(batch_size: int = 8):
                 "input_spec": _normalize_property(r.get("input_spec", "")),
                 "output_spec": _normalize_property(r.get("output_spec", "")),
                 "edge_cases": json.dumps(r.get("edge_cases", [])),
-                "test_recommendations": json.dumps(r.get("test_recommendations", [])),
+                "test_recommendations": _parse_test_recommendations(r.get("test_recommendations", [])),
             })
             enriched_count += 1
         except Exception as e:
@@ -248,7 +288,7 @@ def enrich_functions_for_files(file_paths: list[str], batch_size: int = 4):
                 "input_spec": _normalize_property(r.get("input_spec", "")),
                 "output_spec": _normalize_property(r.get("output_spec", "")),
                 "edge_cases": json.dumps(r.get("edge_cases", [])),
-                "test_recommendations": json.dumps(r.get("test_recommendations", [])),
+                "test_recommendations": _parse_test_recommendations(r.get("test_recommendations", [])),
             })
         except Exception as e:
             print(f"[Enricher] Error writing {r.get('_name', '?')}: {e}")

@@ -1,3 +1,4 @@
+import json
 from graph.neo4j_client import get_client
 
 
@@ -69,6 +70,40 @@ def build_file_nodes(parsed_files: list[dict]):
                     "caller": node["name"],
                     "file": node["file"],
                     "callee": called.split(".")[-1],  # normalize "obj.method" -> "method"
+                })
+
+        # IMPORTS: Create Module nodes and File -[:IMPORTS]-> Module edges
+        for imp in parsed.get("imports", []):
+            module_name = imp.get("module", "")
+            if not module_name:
+                continue
+            client.run("""
+                MERGE (m:Module {name: $module_name})
+                SET m.is_external = $is_external,
+                    m.is_stdlib = $is_stdlib
+                WITH m
+                MATCH (f:File {path: $file_path})
+                MERGE (f)-[:IMPORTS {full_path: $full_path, alias: $alias, names: $names}]->(m)
+            """, {
+                "module_name": module_name,
+                "is_external": imp.get("is_external", True),
+                "is_stdlib": imp.get("is_stdlib", False),
+                "file_path": parsed["file"],
+                "full_path": imp.get("full_path", ""),
+                "alias": imp.get("alias", ""),
+                "names": json.dumps(imp.get("names", [])),
+            })
+
+            # USES_EXTERNAL: Function -> Module (if function body calls this module)
+            if imp.get("is_external"):
+                client.run("""
+                    MATCH (fn:Function {file: $file_path})
+                    WHERE any(call IN fn.calls WHERE call STARTS WITH $module_name)
+                    MATCH (m:Module {name: $module_name})
+                    MERGE (fn)-[:USES_EXTERNAL]->(m)
+                """, {
+                    "file_path": parsed["file"],
+                    "module_name": module_name,
                 })
 
     print(f"[Builder] File and function nodes built ({len(parsed_files)} files).")
@@ -157,3 +192,61 @@ def _node_type_to_label(node_type: str) -> str:
         "class_declaration": "Class",
     }
     return mapping.get(node_type, "Function")
+
+
+def link_commits_to_functions(commits: list[dict], parsed_files: list[dict], repo_path: str):
+    """
+    Create Commit -[:CHANGED]-> Function relationships by overlapping
+    commit diff line ranges with function start_line/end_line.
+    """
+    from parsers.git_parser import parse_commit_diff
+    client = get_client()
+
+    # Build lookup: file_path -> list of {name, start_line, end_line}
+    file_functions = {}
+    for pf in parsed_files:
+        for node in pf.get("nodes", []):
+            fp = node.get("file", "")
+            if fp not in file_functions:
+                file_functions[fp] = []
+            file_functions[fp].append({
+                "name": node["name"],
+                "start_line": node["start_line"],
+                "end_line": node["end_line"],
+            })
+
+    linked = 0
+    for commit in commits:
+        commit_hash = commit.get("full_hash") or commit.get("hash", "")
+        if not commit_hash:
+            continue
+
+        diff_data = parse_commit_diff(repo_path, commit_hash)
+        changed_ranges = diff_data.get("changed_ranges", {})
+
+        for file_rel_path, ranges in changed_ranges.items():
+            # Try to match file_rel_path to our parsed file paths
+            matching_files = [
+                fp for fp in file_functions
+                if fp.replace("\\", "/").endswith(file_rel_path.replace("\\", "/"))
+            ]
+
+            for fp in matching_files:
+                for func in file_functions[fp]:
+                    # Check overlap: not (func.end < range_start or func.start > range_end)
+                    for r_start, r_end in ranges:
+                        if not (func["end_line"] < r_start or func["start_line"] > r_end):
+                            client.run("""
+                                MATCH (c:Commit {hash: $hash})
+                                MATCH (f:Function {name: $func_name, file: $file_path})
+                                MERGE (c)-[:CHANGED {date: $date}]->(f)
+                            """, {
+                                "hash": commit["hash"],
+                                "func_name": func["name"],
+                                "file_path": fp,
+                                "date": commit.get("date", ""),
+                            })
+                            linked += 1
+                            break  # One link per function per commit is enough
+
+    print(f"[Builder] Linked {linked} commit-function relationships.")

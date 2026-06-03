@@ -307,9 +307,13 @@ def run_full_init():
 
     # 4. Build structural graph
     print("\n[4/8] Building structural graph...")
-    from graph.builder import build_file_nodes, build_git_nodes, build_semantic_nodes
+    from graph.builder import build_file_nodes, build_git_nodes, build_semantic_nodes, link_commits_to_functions
     build_file_nodes(parsed_files)
     build_git_nodes(commits)
+
+    # 4b. Link commits to functions they changed
+    print("\n[4b/8] Linking commits to changed functions...")
+    link_commits_to_functions(commits, parsed_files, CODEBASE_PATH)
 
     # 5. LLM extraction
     print("\n[5/8] Extracting semantic entities (LLM)...")
@@ -461,6 +465,14 @@ def run_incremental_sync():
     detect_communities()
     summarize_all_communities()
 
+    # 6b. Link new commits to functions
+    if new_commits and modified_files:
+        from graph.builder import link_commits_to_functions
+        # Build parsed info for linking
+        link_parsed = [p for p in [parse_file(f) for f in modified_files] if p] if modified_files else []
+        if link_parsed:
+            link_commits_to_functions(new_commits[:10], link_parsed, CODEBASE_PATH)
+
     # Update sync state
     head = _get_head_commit(CODEBASE_PATH)
     _save_sync_state({
@@ -494,7 +506,15 @@ def main():
         "--force-init", action="store_true",
         help="Force full re-initialization, discarding existing sync state."
     )
+    parser.add_argument(
+        "--status", action="store_true",
+        help="Print current graph statistics and exit."
+    )
     args = parser.parse_args()
+
+    if args.status:
+        run_status()
+        return
 
     sync_state = _load_sync_state()
 
@@ -508,6 +528,51 @@ def main():
         run_full_init()
     else:
         run_incremental_sync()
+
+
+def run_status():
+    """Print current graph statistics without running any sync."""
+    sync_state = _load_sync_state()
+    print("=" * 60)
+    print("GraphRAG — Status")
+    print("=" * 60)
+    print(f"Target codebase : {CODEBASE_PATH}")
+    print(f"Data directory  : {GRAPHRAG_DATA_DIR}")
+
+    if sync_state:
+        print(f"Last sync time  : {sync_state.get('last_sync_time', 'unknown')}")
+        print(f"Last commit     : {(sync_state.get('last_synced_commit') or 'N/A')[:12]}")
+        print(f"Sync mode       : {sync_state.get('mode', 'unknown')}")
+    else:
+        print("Sync state      : Not initialized yet")
+        return
+
+    try:
+        _start_docker()
+        from graph.neo4j_client import get_client
+        client = get_client()
+
+        stats = client.run("""
+            MATCH (f:Function) WITH count(f) as total_functions
+            MATCH (f2:Function) WHERE f2.how_it_works IS NOT NULL
+            WITH total_functions, count(f2) as enriched_functions
+            OPTIONAL MATCH (m:Module) WITH total_functions, enriched_functions, count(m) as total_modules
+            OPTIONAL MATCH (c:Commit) WITH total_functions, enriched_functions, total_modules, count(c) as total_commits
+            RETURN total_functions, enriched_functions, total_modules, total_commits
+        """)[0]
+
+        total = stats["total_functions"]
+        enriched = stats["enriched_functions"]
+        coverage = f"{enriched / max(total, 1) * 100:.1f}%"
+
+        print(f"\n--- Graph Statistics ---")
+        print(f"Functions       : {total}")
+        print(f"Enriched        : {enriched} ({coverage})")
+        print(f"Modules         : {stats['total_modules']}")
+        print(f"Commits indexed : {stats['total_commits']}")
+    except Exception as e:
+        print(f"\nCould not connect to Neo4j: {e}")
+        print("Make sure Docker is running.")
 
 
 if __name__ == "__main__":

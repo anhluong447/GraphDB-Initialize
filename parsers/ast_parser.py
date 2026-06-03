@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import json
 from pathlib import Path
 from tree_sitter import Language, Parser
@@ -7,6 +8,38 @@ import tree_sitter_python as tspython
 import tree_sitter_javascript as tsjavascript
 import tree_sitter_typescript as tstypescript
 from config import CODEBASE_PATH, SUPPORTED_LANGUAGES, IGNORE_DIRS
+
+# Python stdlib module names (major modules, used for is_stdlib detection)
+_PYTHON_STDLIB = {
+    "abc", "aifc", "argparse", "array", "ast", "asyncio", "atexit", "base64",
+    "binascii", "bisect", "builtins", "bz2", "calendar", "cgi", "cgitb",
+    "cmath", "cmd", "code", "codecs", "collections", "colorsys", "compileall",
+    "concurrent", "configparser", "contextlib", "contextvars", "copy", "copyreg",
+    "cProfile", "csv", "ctypes", "curses", "dataclasses", "datetime", "dbm",
+    "decimal", "difflib", "dis", "distutils", "doctest", "email", "encodings",
+    "enum", "errno", "faulthandler", "fcntl", "filecmp", "fileinput", "fnmatch",
+    "fractions", "ftplib", "functools", "gc", "getopt", "getpass", "gettext",
+    "glob", "grp", "gzip", "hashlib", "heapq", "hmac", "html", "http",
+    "idlelib", "imaplib", "imghdr", "imp", "importlib", "inspect", "io",
+    "ipaddress", "itertools", "json", "keyword", "lib2to3", "linecache",
+    "locale", "logging", "lzma", "mailbox", "mailcap", "marshal", "math",
+    "mimetypes", "mmap", "modulefinder", "multiprocessing", "netrc", "nis",
+    "nntplib", "numbers", "operator", "optparse", "os", "ossaudiodev",
+    "pathlib", "pdb", "pickle", "pickletools", "pipes", "pkgutil", "platform",
+    "plistlib", "poplib", "posixpath", "pprint", "profile", "pstats", "pty",
+    "pwd", "py_compile", "pyclbr", "pydoc", "queue", "quopri", "random",
+    "re", "readline", "reprlib", "resource", "rlcompleter", "runpy", "sched",
+    "secrets", "select", "selectors", "shelve", "shlex", "shutil", "signal",
+    "site", "smtpd", "smtplib", "sndhdr", "socket", "socketserver", "sqlite3",
+    "ssl", "stat", "statistics", "string", "stringprep", "struct", "subprocess",
+    "sunau", "symtable", "sys", "sysconfig", "syslog", "tabnanny", "tarfile",
+    "telnetlib", "tempfile", "termios", "test", "textwrap", "threading", "time",
+    "timeit", "tkinter", "token", "tokenize", "tomllib", "trace", "traceback",
+    "tracemalloc", "tty", "turtle", "turtledemo", "types", "typing",
+    "unicodedata", "unittest", "urllib", "uuid", "venv", "warnings", "wave",
+    "weakref", "webbrowser", "winreg", "winsound", "wsgiref", "xdrlib",
+    "xml", "xmlrpc", "zipapp", "zipfile", "zipimport", "zlib", "_thread",
+}
 
 PY_LANGUAGE = Language(tspython.language())
 JS_LANGUAGE = Language(tsjavascript.language())
@@ -44,10 +77,13 @@ def parse_file(file_path: str) -> dict:
     nodes = []
     _extract_nodes(tree.root_node, source_bytes, file_path, lang_name, nodes)
 
+    imports = _extract_imports(tree.root_node, source_bytes, file_path, lang_name)
+
     return {
         "file": file_path,
         "language": lang_name,
         "nodes": nodes,
+        "imports": imports,
         "raw_code": source_bytes.decode("utf-8", errors="ignore"),
     }
 
@@ -388,6 +424,171 @@ def _extract_calls(node, source_bytes: bytes) -> list[str]:
     for child in node.children:
         calls.extend(_extract_calls(child, source_bytes))
     return list(set(calls))
+
+
+def _extract_imports(root_node, source_bytes: bytes, file_path: str, lang: str) -> list[dict]:
+    """
+    Extract all import statements from a file's AST.
+    Returns list of dicts with: module, full_path, alias, names, is_external, is_stdlib, source_file.
+    """
+    imports = []
+
+    def _get_text(node):
+        return source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="ignore")
+
+    def _walk_imports(node):
+        # ── Python ──
+        if lang == "python":
+            # import X / import X as Y / import X, Y
+            if node.type == "import_statement":
+                for child in node.children:
+                    if child.type == "dotted_name":
+                        module_name = _get_text(child)
+                        root_mod = module_name.split(".")[0]
+                        imports.append({
+                            "module": root_mod,
+                            "full_path": module_name,
+                            "alias": "",
+                            "names": [],
+                            "is_external": root_mod not in _PYTHON_STDLIB,
+                            "is_stdlib": root_mod in _PYTHON_STDLIB,
+                            "source_file": file_path,
+                        })
+                    elif child.type == "aliased_import":
+                        name_node = child.child_by_field_name("name")
+                        alias_node = child.child_by_field_name("alias")
+                        if name_node:
+                            module_name = _get_text(name_node)
+                            root_mod = module_name.split(".")[0]
+                            imports.append({
+                                "module": root_mod,
+                                "full_path": module_name,
+                                "alias": _get_text(alias_node) if alias_node else "",
+                                "names": [],
+                                "is_external": root_mod not in _PYTHON_STDLIB,
+                                "is_stdlib": root_mod in _PYTHON_STDLIB,
+                                "source_file": file_path,
+                            })
+
+            # from X import Y / from X import Y as Z
+            elif node.type == "import_from_statement":
+                module_node = node.child_by_field_name("module_name")
+                module_name = _get_text(module_node) if module_node else ""
+                root_mod = module_name.split(".")[0] if module_name else ""
+
+                # Check for relative imports (from . import / from .. import)
+                is_relative = False
+                for child in node.children:
+                    if _get_text(child) in (".", ".."):
+                        is_relative = True
+                        break
+
+                names = []
+                alias = ""
+                for child in node.children:
+                    if child.type == "dotted_name" and child != module_node:
+                        names.append(_get_text(child))
+                    elif child.type == "aliased_import":
+                        name_n = child.child_by_field_name("name")
+                        alias_n = child.child_by_field_name("alias")
+                        if name_n:
+                            names.append(_get_text(name_n))
+                        if alias_n:
+                            alias = _get_text(alias_n)
+
+                if is_relative:
+                    is_ext = False
+                    is_std = False
+                else:
+                    is_ext = root_mod not in _PYTHON_STDLIB and root_mod != ""
+                    is_std = root_mod in _PYTHON_STDLIB
+
+                if module_name or names:
+                    imports.append({
+                        "module": root_mod,
+                        "full_path": module_name,
+                        "alias": alias,
+                        "names": names,
+                        "is_external": is_ext,
+                        "is_stdlib": is_std,
+                        "source_file": file_path,
+                    })
+
+        # ── JavaScript / TypeScript ──
+        elif lang in ("javascript", "typescript"):
+            # import X from 'Y' / import { A, B } from 'Y'
+            if node.type == "import_statement":
+                source_node = node.child_by_field_name("source")
+                module_name = ""
+                if source_node:
+                    module_name = _get_text(source_node).strip("'\"")
+
+                root_mod = module_name.split("/")[0] if module_name else ""
+                # Relative imports start with . or ..
+                is_relative = module_name.startswith(".")
+                names = []
+                alias = ""
+                for child in node.children:
+                    if child.type == "import_clause":
+                        for sub in child.children:
+                            if sub.type == "identifier":
+                                alias = _get_text(sub)
+                            elif sub.type == "named_imports":
+                                for spec in sub.children:
+                                    if spec.type == "import_specifier":
+                                        name_n = spec.child_by_field_name("name")
+                                        if name_n:
+                                            names.append(_get_text(name_n))
+
+                if module_name:
+                    imports.append({
+                        "module": root_mod,
+                        "full_path": module_name,
+                        "alias": alias,
+                        "names": names,
+                        "is_external": not is_relative,
+                        "is_stdlib": False,
+                        "source_file": file_path,
+                    })
+
+            # const X = require('Y')
+            if node.type == "lexical_declaration" or node.type == "variable_declaration":
+                raw = _get_text(node)
+                req_match = re.search(r"""require\s*\(\s*['"]([^'"]+)['"]\s*\)""", raw)
+                if req_match:
+                    module_name = req_match.group(1)
+                    root_mod = module_name.split("/")[0]
+                    is_relative = module_name.startswith(".")
+                    imports.append({
+                        "module": root_mod,
+                        "full_path": module_name,
+                        "alias": "",
+                        "names": [],
+                        "is_external": not is_relative,
+                        "is_stdlib": False,
+                        "source_file": file_path,
+                    })
+
+        for child in node.children:
+            _walk_imports(child)
+
+    _walk_imports(root_node)
+
+    # Post-process: mark internal imports (module exists inside codebase)
+    codebase_modules = set()
+    try:
+        for item in os.listdir(CODEBASE_PATH):
+            name = item.replace(".py", "").replace(".js", "").replace(".ts", "")
+            codebase_modules.add(name)
+    except Exception:
+        pass
+
+    for imp in imports:
+        if imp["module"] in codebase_modules:
+            imp["is_external"] = False
+            imp["is_stdlib"] = False
+
+    return imports
 
 
 def parse_codebase(path: str = CODEBASE_PATH) -> list[dict]:
