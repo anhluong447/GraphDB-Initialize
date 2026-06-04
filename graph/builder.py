@@ -22,11 +22,24 @@ def build_file_nodes(parsed_files: list[dict]):
             label = _node_type_to_label(node["type"])
 
             # Create Function/Class node with rich testing metadata
+            # raw_code is stored directly in Neo4j so remote clients
+            # don't need access to the local file system
+            raw_code = node.get("raw_code", "")
+            if not raw_code:
+                # For tree-sitter nodes, raw_code comes from parsed["raw_code"]
+                raw = parsed.get("raw_code", "")
+                s = node.get("start_line", 1)
+                e = node.get("end_line", s)
+                if raw and s and e:
+                    raw_lines = raw.splitlines()
+                    raw_code = "\n".join(raw_lines[s - 1 : e])
+
             client.run(f"""
                 MERGE (n:{label} {{name: $name, file: $file}})
                 SET n.start_line = $start_line,
                     n.end_line = $end_line,
                     n.anchor = $anchor,
+                    n.raw_code = $raw_code,
                     n.visibility = $visibility,
                     n.is_async = $is_async,
                     n.class_name = $class_name,
@@ -42,6 +55,7 @@ def build_file_nodes(parsed_files: list[dict]):
                 "start_line": node["start_line"],
                 "end_line": node["end_line"],
                 "anchor": node.get("anchor", ""),
+                "raw_code": raw_code[:5000],  # cap at 5000 chars to avoid Neo4j property size limits
                 "visibility": node.get("visibility", "public"),
                 "is_async": node.get("is_async", False),
                 "class_name": node.get("class_name", None),

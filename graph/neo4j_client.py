@@ -62,23 +62,31 @@ class Neo4jClient:
 
     def read_node_code(self, node: dict) -> str:
         """
-        Read source code of a node from file.
-        If start_line is stale (anchor doesn't match), search and update Neo4j.
+        Read source code of a node.
+        Priority:
+          1. raw_code stored directly in Neo4j (works for remote clients)
+          2. Read from local file system using start_line/end_line (fallback)
         
         Args:
-            node: dict containing file, start_line, end_line, anchor, name
+            node: dict containing file, start_line, end_line, anchor, name, raw_code
         Returns:
             Source code of that node
         """
         import os
+
+        # Priority 1: use raw_code stored in Neo4j (portable, works for remote clients)
+        stored_raw = node.get("raw_code", "")
+        if stored_raw and stored_raw.strip():
+            return stored_raw
+
+        # Priority 2: fallback to reading from local file system
         file_path = node.get("file")
         start_line = node.get("start_line")
         end_line = node.get("end_line")
-        anchor = node.get("anchor", "")
-        
+
         if not file_path:
             return ""
-            
+
         # Try to resolve relative path if not absolute
         if not os.path.isabs(file_path):
             from config import CODEBASE_PATH
@@ -89,15 +97,15 @@ class Neo4jClient:
         if not os.path.exists(file_path):
             return ""
 
-        # Backward compatibility for old DB entries that only have raw_code
         if start_line is None or end_line is None:
-            return node.get("raw_code", "")
+            return ""
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
         except Exception:
             return ""
+
 
         # Check if anchor matches
         actual_line = lines[start_line - 1].strip() if 1 <= start_line <= len(lines) else ""
