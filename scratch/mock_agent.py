@@ -48,6 +48,11 @@ print("==================================================")
 
 def start_live_server_if_needed():
     global API_BASE_URL
+    # If API_BASE_URL is configured to a remote server, bypass local startup
+    if "localhost" not in API_BASE_URL and "127.0.0.1" not in API_BASE_URL:
+        print(f"📡 API_BASE_URL is remote: {API_BASE_URL}. Connecting directly without starting local server.\n")
+        return
+        
     import socket
     import threading
     import time
@@ -364,7 +369,7 @@ def get_valid_commit_hash(repo_path):
 _offline_mode = None
 
 def call_api(method, endpoint, json_data=None, params=None):
-    """Helper to perform requests with error handling and offline fallback."""
+    """Helper to perform requests with error handling, retries, and offline fallback."""
     global _offline_mode
     url = f"{API_BASE_URL}{endpoint}"
     
@@ -372,54 +377,95 @@ def call_api(method, endpoint, json_data=None, params=None):
     if _offline_mode is True:
         return get_mock_response(method, endpoint, json_data, params)
         
-    try:
-        if method.upper() == "GET":
-            r = requests.get(url, headers=headers, params=params, timeout=5)
-        elif method.upper() == "POST":
-            r = requests.post(url, headers=headers, json=json_data, timeout=5)
-        else:
-            raise ValueError(f"Unsupported method: {method}")
-        
-        # Check authorization failure first
-        if r.status_code == 401:
-            print("❌ Authentication failed. Check your API_KEY in .env.")
-            sys.exit(1)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            if method.upper() == "GET":
+                r = requests.get(url, headers=headers, params=params, timeout=10)
+            elif method.upper() == "POST":
+                r = requests.post(url, headers=headers, json=json_data, timeout=10)
+            else:
+                raise ValueError(f"Unsupported method: {method}")
             
-        # Determine mode on the first call to the server
-        if _offline_mode is None:
-            if r.status_code == 404:
+            # Check authorization failure first
+            if r.status_code == 401:
+                print("❌ Authentication failed. Check your API_KEY in .env.")
+                sys.exit(1)
+                
+            if r.status_code == 409:
+                return {"status": "conflict", "detail": "A pipeline job is already running."}
+                
+            if r.status_code == 400:
+                try:
+                    err_data = r.json()
+                    if "not in FIRST_RUN mode" in err_data.get("detail", ""):
+                        return {"status": "already_completed", "detail": err_data.get("detail")}
+                except Exception:
+                    pass
+
+            # Determine mode on the first call to the server
+            if _offline_mode is None:
+                if r.status_code == 404:
+                    _offline_mode = True
+                    print("⚠️  GraphRAG Server returned 404 on init. Visualizer backend might be running on this port.")
+                    print("💡  Switching to OFFLINE MOCK SIMULATION MODE (no server required)...")
+                    print("--------------------------------------------------")
+                    return get_mock_response(method, endpoint, json_data, params)
+                else:
+                    _offline_mode = False
+                    print("🟢 Connected to live GraphRAG Server. Running in ONLINE mode.")
+                    print("--------------------------------------------------")
+                    
+            r.raise_for_status()
+            return r.json()
+            
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError) as e:
+            # If we haven't determined the mode yet, fallback to offline on the first failure
+            if _offline_mode is None:
                 _offline_mode = True
-                print("⚠️  GraphRAG Server returned 404 on init. Visualizer backend might be running on this port.")
+                print(f"⚠️  GraphRAG Server not responding. Error details: {e}")
+                print("💡  Switching to OFFLINE MOCK SIMULATION MODE (no server required)...")
+                print("--------------------------------------------------")
+                return get_mock_response(method, endpoint, json_data, params)
+            
+            # Otherwise, if we are in online mode, retry on transient network errors
+            if attempt < max_retries - 1:
+                print(f"⚠️  Transient network error on {endpoint}: {e}. Retrying in 3 seconds (attempt {attempt + 2}/{max_retries})...")
+                time.sleep(3)
+            else:
+                print(f"❌ API Call to {endpoint} failed after {max_retries} attempts: {e}")
+                sys.exit(1)
+        except requests.exceptions.RequestException as e:
+            # For other HTTP/Request errors, fail immediately or fallback
+            if _offline_mode is None:
+                _offline_mode = True
+                print(f"⚠️  GraphRAG Server not responding. Error details: {e}")
                 print("💡  Switching to OFFLINE MOCK SIMULATION MODE (no server required)...")
                 print("--------------------------------------------------")
                 return get_mock_response(method, endpoint, json_data, params)
             else:
-                _offline_mode = False
-                print("🟢 Connected to live GraphRAG Server. Running in ONLINE mode.")
-                print("--------------------------------------------------")
-                
-        r.raise_for_status()
-        return r.json()
-        
-    except requests.exceptions.RequestException as e:
-        if _offline_mode is None:
-            _offline_mode = True
-            print(f"⚠️  GraphRAG Server not responding. Error details: {e}")
-            print("💡  Switching to OFFLINE MOCK SIMULATION MODE (no server required)...")
-            print("--------------------------------------------------")
-            return get_mock_response(method, endpoint, json_data, params)
-        else:
-            # If we are in online mode, fail loudly on network errors
-            print(f"❌ API Call to {endpoint} failed: {e}")
-            sys.exit(1)
+                print(f"❌ API Call to {endpoint} failed: {e}")
+                sys.exit(1)
 
 # ─────────────────────────────────────────────────────────────
 # Phase 1: Initialize Pipeline and Poll Status
 # ─────────────────────────────────────────────────────────────
 print("[Phase 1] Initializing codebase analysis...")
 init_resp = call_api("POST", "/api/repo/init", {"repo_url": TARGET_REPO_URL})
-job_id = init_resp.get("job_id")
-print(f"✔️ Analysis job queued successfully. Job ID: {job_id}")
+if isinstance(init_resp, dict) and init_resp.get("status") == "conflict":
+    print("⚠️  A codebase analysis pipeline is already running on the server.")
+    print("📡 Querying server health to find the active job...")
+    health_resp = call_api("GET", "/api/health")
+    current_job = health_resp.get("current_job")
+    if current_job and current_job.get("job_id"):
+        job_id = current_job["job_id"]
+        print(f"✔️ Connected to active job: {job_id}")
+    else:
+        print("❌ Could not retrieve active job ID. Exiting.")
+        sys.exit(1)
+else:
+    job_id = init_resp.get("job_id")
+    print(f"✔️ Analysis job queued successfully. Job ID: {job_id}")
 
 print("Polling analysis status...")
 while True:
@@ -553,8 +599,11 @@ complete_payload = {
     "generated_count": processed_count
 }
 complete_resp = call_api("POST", "/api/first_run/complete", complete_payload)
-print(f"✔️ First run complete! Server transitioned successfully.")
-print(f"Status response: {complete_resp}\n")
+if isinstance(complete_resp, dict) and complete_resp.get("status") == "already_completed":
+    print("💡  Server is already in ONGOING mode (transition previously completed).\n")
+else:
+    print(f"✔️ First run complete! Server transitioned successfully.")
+    print(f"Status response: {complete_resp}\n")
 
 # ─────────────────────────────────────────────────────────────
 # Phase 5: Ongoing Sync and Change Detection (CI/CD Webhook & Regression Testing)

@@ -15,7 +15,13 @@ def parse_git_history(path: str = CODEBASE_PATH, max_commits: int = 500) -> list
         return []
 
     commits = []
-    for commit in list(repo.iter_commits())[:max_commits]:
+    try:
+        commit_list = list(repo.iter_commits())[:max_commits]
+    except Exception as e:
+        print(f"[GitParser] Warning: Could not iterate commits (repo might be empty or in a detached state): {e}")
+        return []
+
+    for commit in commit_list:
         try:
             files_changed = list(commit.stats.files.keys())
         except Exception:
