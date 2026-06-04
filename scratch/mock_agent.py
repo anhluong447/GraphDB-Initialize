@@ -29,7 +29,7 @@ if sys.platform.startswith("win"):
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
 # Server configuration
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8080")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8080").rstrip("/")
 API_KEY = os.getenv("API_KEY", "")
 
 # The agent runs from the target project. Default TARGET_REPO_URL to current working directory.
@@ -333,50 +333,73 @@ except Exception as e:
     print("--------------------------------------------------")
     health_data = get_mock_response("GET", "/api/health")
 
+def get_repo_name(path_or_url):
+    if not path_or_url:
+        return ""
+    # Strip trailing slashes
+    path = path_or_url.rstrip("/\\")
+    # If it's a git URL, strip .git
+    if path.endswith(".git"):
+        path = path[:-4]
+    # Replace backslashes with forward slashes and split
+    parts = path.replace("\\", "/").split("/")
+    return parts[-1] if parts else ""
+
 server_mode = health_data.get("mode", "IDLE")
 server_repo = health_data.get("codebase_path")
 current_job = health_data.get("current_job")
 
+target_repo_name = get_repo_name(TARGET_REPO_URL).lower()
+
+print(f"🔍 [Debug] Server Codebase Path: {server_repo}")
+print(f"🔍 [Debug] Target Codebase Path: {TARGET_REPO_URL}")
+print(f"🔍 [Debug] Target Repo Name:     {target_repo_name}")
+
 # Check if a graph has already been built for this codebase on the server
 graph_exists = False
-if server_mode in ("FIRST_RUN", "ONGOING") and server_repo:
-    # Normalize paths to compare
-    norm_server = os.path.abspath(server_repo).lower() if not server_repo.startswith("http") else server_repo.lower()
-    norm_target = os.path.abspath(TARGET_REPO_URL).lower() if not TARGET_REPO_URL.startswith("http") else TARGET_REPO_URL.lower()
-    if norm_server == norm_target:
+if server_repo:
+    server_repo_name = get_repo_name(server_repo).lower()
+    print(f"🔍 [Debug] Server Repo Name:     {server_repo_name}")
+    if target_repo_name and server_repo_name == target_repo_name:
         graph_exists = True
 
-job_id = None
+# Fallback: check /api/repo/snapshot to see if database already has nodes for this repo
+cached_snapshot = None
+if not graph_exists and not _offline_mode:
+    try:
+        snapshot_data = call_api("POST", "/api/repo/snapshot")
+        if isinstance(snapshot_data, dict):
+            communities = snapshot_data.get("communities", [])
+            found = False
+            for comm in communities:
+                for fn in comm.get("functions", []):
+                    fn_file = fn.get("file", "")
+                    if fn_file:
+                        # Split normalized path and check if repository name is in the components
+                        fn_parts = fn_file.replace("\\", "/").lower().split("/")
+                        if target_repo_name in fn_parts:
+                            graph_exists = True
+                            found = True
+                            cached_snapshot = snapshot_data
+                            break
+                if found:
+                    break
+    except Exception:
+        pass
+
 if not graph_exists:
-    print("ℹ️  No codebase graph has been built on the server for this repository yet.")
-    print("🚀 Triggering new repository ingestion pipeline...")
-    init_resp = call_api("POST", "/api/repo/init", {"repo_url": TARGET_REPO_URL})
-    
-    if isinstance(init_resp, dict) and init_resp.get("status") == "conflict":
-        print("⚠️  A codebase analysis pipeline is already running on the server.")
-        if current_job and current_job.get("job_id"):
-            job_id = current_job["job_id"]
-            print(f"✔️ Connected to active job: {job_id}")
-        else:
-            # Re-fetch health to get job ID
-            health_resp = call_api("GET", "/api/health")
-            current_job = health_resp.get("current_job")
-            if current_job and current_job.get("job_id"):
-                job_id = current_job["job_id"]
-                print(f"✔️ Connected to active job: {job_id}")
-            else:
-                print("❌ Could not retrieve active job ID. Exiting.")
-                sys.exit(1)
-    else:
-        job_id = init_resp.get("job_id")
-        print(f"✔️ Analysis job queued successfully. Job ID: {job_id}")
-else:
-    print(f"✔️ Found existing graph for this repository on the server ({server_mode} mode).")
-    if server_mode == "FIRST_RUN":
-        # If ingestion is still in progress, attach to it
-        if current_job and current_job.get("job_id"):
-            job_id = current_job["job_id"]
-            print(f"✔️ Ingestion is still in progress (Job: {job_id}). Reconnecting...")
+    print(f"❌ No existing graph for repository '{target_repo_name}' was found on the server.")
+    print("⚠️  Automatic graph creation is disabled. Please index the codebase on the server first.")
+    sys.exit(1)
+
+print(f"✔️ Found existing graph for this repository on the server ({server_mode} mode).")
+
+job_id = None
+if server_mode == "FIRST_RUN":
+    # If ingestion is still in progress, attach to it
+    if current_job and current_job.get("job_id"):
+        job_id = current_job["job_id"]
+        print(f"✔️ Ingestion is still in progress (Job: {job_id}). Reconnecting...")
 
 if job_id:
     print("Polling analysis status...")
@@ -409,7 +432,11 @@ else:
 # Phase 2: Fetch Codebase Snapshot and Build Queue
 # ─────────────────────────────────────────────────────────────
 print("[Phase 2] Fetching codebase snapshot for test planning...")
-snapshot = call_api("POST", "/api/repo/snapshot")
+if cached_snapshot:
+    snapshot = cached_snapshot
+    print("✔️ Using cached codebase snapshot.")
+else:
+    snapshot = call_api("POST", "/api/repo/snapshot")
 total_functions = snapshot.get("total", 0)
 communities = snapshot.get("communities", [])
 

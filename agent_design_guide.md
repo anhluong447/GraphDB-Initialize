@@ -28,10 +28,10 @@ The GraphRAG Knowledge Base operates on a decoupled client-server model:
 
 ## 🔄 2. Connection, Discovery & Ingestion Flow
 
-When the agent starts up inside a codebase, it must verify if the codebase has already been indexed on the server, check for active ingestion runs, or initiate a new build from scratch.
+When the agent starts up inside a codebase, it must verify if the codebase has already been indexed on the server. The client-side agent does not initiate new builds or call `/api/repo/init` (which is restricted on the server to prevent data loss). Instead, it locates the pre-existing graph for the repository.
 
-### Step A: Verify Graph Status & Active Ingestion
-Send a `GET` request to `/api/health` to inspect the server's current operational state:
+### Step A: Verify Graph Status by Repository Name
+1. Send a `GET` request to `/api/health` to inspect the server's current operational state:
 ```http
 GET /api/health
 ```
@@ -40,51 +40,30 @@ GET /api/health
 ```json
 {
   "status": "ok",
-  "mode": "IDLE",
-  "total_functions": 0,
+  "mode": "ONGOING",
+  "total_functions": 125,
   "queued_commits": 0,
-  "last_sync": null,
+  "last_sync": "2026-06-04T12:00:00",
   "current_job": null,
-  "codebase_path": null
+  "codebase_path": "/app/opensourcepos"
 }
 ```
 
+2. Extract and compare the **repository directory name** from both the server's `codebase_path` and the client's `TARGET_REPO_URL` (case-insensitive) to handle cross-platform paths (e.g. comparing `opensourcepos` from `/app/opensourcepos` and `D:\projects\opensourcepos`).
+
+3. **Fallback Discovery**: If the server is in `IDLE` mode or the codebase path does not match directly, the agent sends a query to `GET /api/functions?limit=5` and inspects the first few returned function file paths. If the extracted repository name of those functions matches the target repository, the graph exists in the database.
+
 #### State Evaluation Matrix:
-| Server Mode | `codebase_path` Matching Target? | Action Required |
+| Server Mode / DB State | Repository Name Matches? | Action Required |
 | :--- | :--- | :--- |
-| **`IDLE`** | *Any / None* | **Clean Slate**: No graph is built on the server yet. Initiate ingestion (Step B). |
-| **`FIRST_RUN`** | **No** (Path mismatch) | **New Target**: Trigger ingestion for the target project (Step B). |
-| **`FIRST_RUN`** | **Yes** | **Ingestion Running/Unfinished**: Check `current_job`. If a job is active, attach to it and poll status (Step C). |
-| **`ONGOING`** | **No** (Path mismatch) | **New Target**: Trigger ingestion for the target project (Step B). |
-| **`ONGOING`** | **Yes** | **Complete**: The graph is fully built. Skip ingestion and proceed to test backlog (Step D). |
+| **`FIRST_RUN`** | **Yes** | **Ingestion Running/Unfinished**: Retrieve `current_job`. If a job is active, attach to it and poll status (Step B). |
+| **`ONGOING` / `IDLE` (with functions)** | **Yes** | **Complete**: The graph is fully built. Skip ingestion and proceed to test planning (Step C). |
+| *Any* | **No / Not Found** | **Not Indexed**: Print a clear error message instructing the user to run the indexer on the server first, then exit with code 1. |
 
 ---
 
-### Step B: Initiating Ingestion (If No Graph Exists Yet)
-If no graph is built on the server for the target repository, send a `POST` request to `/api/repo/init` pointing to the absolute path of the local codebase:
-* **Request**:
-  ```http
-  POST /api/repo/init
-  Content-Type: application/json
-  X-API-Key: <your_key>
-  
-  {
-    "repo_url": "/absolute/path/to/client/codebase",
-    "language": "python"
-  }
-  ```
-* **Response**:
-  ```json
-  {
-    "job_id": "job-a1b2c3d4",
-    "status": "queued"
-  }
-  ```
-
----
-
-### Step C: Tracking Ingestion Progress
-If an ingestion job was triggered or was already running, poll `GET /api/repo/status/{job_id}`:
+### Step B: Tracking Active Ingestion Progress
+If an ingestion job is still running (in `FIRST_RUN` mode), the agent attaches to the job and polls `GET /api/repo/status/{job_id}`:
 * **Request**:
   ```http
   GET /api/repo/status/job-a1b2c3d4
@@ -99,6 +78,8 @@ If an ingestion job was triggered or was already running, poll `GET /api/repo/st
     "message": "Extracting semantic entities (LLM)..."
   }
   ```
+The agent prints in-place status updates until the job transitions to `success` or `failed`.
+
 * **Status Completion**: Poll until `status` is `"success"`, `"done"`, or `"complete"`. If status is `"failed"`, halt execution and inspect server logs.
 
 > [!TIP]
@@ -106,7 +87,7 @@ If an ingestion job was triggered or was already running, poll `GET /api/repo/st
 
 ---
 
-### Step D: Fetching Snapshot & Analyzing Existing Test Coverage
+### Step C: Fetching Snapshot & Analyzing Existing Test Coverage
 Once the codebase is indexed, retrieve the snapshot to review the codebase architecture and check for existing test coverage:
 * **Request**:
   ```http
@@ -155,9 +136,8 @@ For each target function in the backlog queue, retrieve the full semantic contex
 
 ### Requesting Context
 ```http
-GET /api/context/{function_name}?file={file_path}
+GET /api/context/{function_name}
 ```
-*Always pass the `file` query parameter to avoid namespace collisions.*
 
 ### Response Schema:
 ```json
