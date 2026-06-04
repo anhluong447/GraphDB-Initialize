@@ -19,9 +19,10 @@ import threading
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from typing import Optional
 
@@ -48,29 +49,20 @@ app.add_middleware(
 
 
 # ═══════════════════════════════════════════════════════════
-# API Key Authentication Middleware
+# API Key Authentication Scheme (Swagger UI Authorize Button)
 # ═══════════════════════════════════════════════════════════
 
-@app.middleware("http")
-async def authenticate(request: Request, call_next):
-    """Check X-API-Key header on all endpoints except /api/health."""
-    # Skip auth for health check and docs
-    if request.url.path in ("/api/health", "/docs", "/openapi.json", "/redoc"):
-        return await call_next(request)
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-    # Skip auth if no API_KEY configured (dev mode)
-    if not API_KEY:
-        return await call_next(request)
-
-    # Validate API key
-    provided_key = request.headers.get("X-API-Key", "")
-    if provided_key != API_KEY:
-        return JSONResponse(
+def verify_api_key(api_key: Optional[str] = Depends(api_key_header)):
+    """Enforce X-API-Key check if API_KEY is set in environment."""
+    if API_KEY and api_key != API_KEY:
+        raise HTTPException(
             status_code=401,
-            content={"error": "Unauthorized. Provide a valid X-API-Key header."},
+            detail="Unauthorized. Provide a valid X-API-Key header.",
         )
+    return api_key
 
-    return await call_next(request)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -94,7 +86,7 @@ class TestDoneRequest(BaseModel):
 # FIRST_RUN Endpoints
 # ═══════════════════════════════════════════════════════════
 
-@app.post("/api/repo/init")
+@app.post("/api/repo/init", dependencies=[Depends(verify_api_key)])
 def repo_init(req: RepoInitRequest):
     """
     Initialize the pipeline for a codebase.
@@ -111,7 +103,7 @@ def repo_init(req: RepoInitRequest):
     return {"job_id": job_id, "status": "queued"}
 
 
-@app.get("/api/repo/status/{job_id}")
+@app.get("/api/repo/status/{job_id}", dependencies=[Depends(verify_api_key)])
 def repo_status(job_id: str):
     """
     Poll pipeline progress.
@@ -132,7 +124,7 @@ def repo_status(job_id: str):
     }
 
 
-@app.post("/api/repo/snapshot")
+@app.post("/api/repo/snapshot", dependencies=[Depends(verify_api_key)])
 def repo_snapshot():
     """
     Return the full codebase snapshot grouped by community with priority scores.
@@ -144,19 +136,13 @@ def repo_snapshot():
     from graph.neo4j_client import get_client
     client = get_client()
 
-    # Fetch all functions with their community info
+    # Fetch all functions with their community info (optimized Cypher query)
     functions = client.run("""
         MATCH (f:Function)
         WHERE f.file IS NOT NULL AND f.name IS NOT NULL
         OPTIONAL MATCH (f)-[:BELONGS_TO]->(c:Community)
-        OPTIONAL MATCH ()-[:CALLS]->(f)
-        WITH f, c,
-             count(DISTINCT c) as _,
-             f.complexity as complexity
-        OPTIONAL MATCH (caller:Function)-[:CALLS]->(f)
-        WITH f, c, complexity, count(DISTINCT caller) as in_degree
-        OPTIONAL MATCH (commit:Commit)-[:CHANGED]->(f)
-        WITH f, c, complexity, in_degree, count(DISTINCT commit) as commit_count
+        WITH f, c, size([(caller:Function)-[:CALLS]->(f) | caller]) as in_degree
+        WITH f, c, in_degree, size([(commit:Commit)-[:CHANGED]->(f) | commit]) as commit_count
         RETURN f.name as name,
                f.file as file,
                f.class_name as class_name,
@@ -223,7 +209,7 @@ def repo_snapshot():
 # Transition Endpoint
 # ═══════════════════════════════════════════════════════════
 
-@app.post("/api/first_run/complete")
+@app.post("/api/first_run/complete", dependencies=[Depends(verify_api_key)])
 def first_run_complete(req: FirstRunCompleteRequest):
     """
     Signal that the Auto-Test Agent has finished generating tests
@@ -247,7 +233,7 @@ def first_run_complete(req: FirstRunCompleteRequest):
 # ONGOING Endpoints
 # ═══════════════════════════════════════════════════════════
 
-@app.get("/api/changes")
+@app.get("/api/changes", dependencies=[Depends(verify_api_key)])
 def get_changes(commit: str):
     """
     Get the list of functions changed by a specific commit.
@@ -312,7 +298,7 @@ def get_changes(commit: str):
 # Shared Endpoints (BOTH modes)
 # ═══════════════════════════════════════════════════════════
 
-@app.get("/api/context/{name}")
+@app.get("/api/context/{name}", dependencies=[Depends(verify_api_key)])
 def get_context(name: str):
     """
     Get full subgraph context for a single function.
@@ -383,7 +369,7 @@ def get_context(name: str):
     }
 
 
-@app.get("/api/functions")
+@app.get("/api/functions", dependencies=[Depends(verify_api_key)])
 def list_functions(has_test: Optional[bool] = None, limit: int = 500):
     """
     List all indexed functions with optional filtering.
@@ -444,7 +430,7 @@ def health_check():
     return health
 
 
-@app.post("/api/test/done")
+@app.post("/api/test/done", dependencies=[Depends(verify_api_key)])
 def test_done(req: TestDoneRequest):
     """
     Mark a function as tested (has_test = true) in Neo4j.
@@ -476,7 +462,7 @@ def test_done(req: TestDoneRequest):
 # Git Sync Webhook
 # ═══════════════════════════════════════════════════════════
 
-@app.post("/api/git-sync")
+@app.post("/api/git-sync", dependencies=[Depends(verify_api_key)])
 def git_sync(background_tasks: BackgroundTasks):
     """
     Webhook endpoint for GitHub/GitLab push events.

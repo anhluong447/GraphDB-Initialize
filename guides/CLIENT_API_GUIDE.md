@@ -33,11 +33,11 @@ Nếu bạn đang viết một **Tác nhân tự động (Auto-Test Agent)** đ�
 ---
 
 ## 1. Thông tin Kết nối cơ bản
-* **Địa chỉ Server (Base URL)**: `http://26.106.237.232:8080`
+* **Địa chỉ Server (Base URL)**: `https://suffice-unselfish-shrouded.ngrok-free.dev`
 * **Xác thực (Authentication)**: Đính kèm API Key trong Header của mọi request:
   * Key: `X-API-Key`
   * Value: `test-key-123`
-* **Tài liệu API tương tác (Swagger UI)**: Truy cập `http://26.106.237.232:8080/docs` bằng trình duyệt để xem và chạy thử trực tiếp.
+* **Tài liệu API tương tác (Swagger UI)**: Truy cập `https://suffice-unselfish-shrouded.ngrok-free.dev/docs` bằng trình duyệt để xem và chạy thử trực tiếp.
 
 ---
 
