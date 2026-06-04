@@ -100,21 +100,25 @@ def _run_pipeline_worker(repo_url: str, language: str, job_id: str):
         import config
         config.CODEBASE_PATH = codebase_path
 
-        # Step 1: Start databases and clear old data for fresh init
-        state.update_job(1, "Starting databases & clearing old index...")
+        # Step 1: Start databases and clear old data ONLY IF it is a new project
+        state.update_job(1, "Starting databases & preparing index...")
         step_start_databases()
         
-        # Clear Neo4j
-        from graph.neo4j_client import get_client
-        get_client().clear_all()
-        
-        # Clear ChromaDB
-        try:
-            from embeddings.chroma_client import chroma as chroma_client
-            for coll in chroma_client.list_collections():
-                chroma_client.delete_collection(coll.name)
-        except Exception as e:
-            print(f"[Pipeline] Warning: Could not clear ChromaDB: {e}")
+        if state.codebase_path != codebase_path:
+            print(f"[Pipeline] New project detected (Old: {state.codebase_path}, New: {codebase_path}). Clearing databases...")
+            # Clear Neo4j
+            from graph.neo4j_client import get_client
+            get_client().clear_all()
+            
+            # Clear ChromaDB
+            try:
+                from embeddings.chroma_client import chroma as chroma_client
+                for coll in chroma_client.list_collections():
+                    chroma_client.delete_collection(coll.name)
+            except Exception as e:
+                print(f"[Pipeline] Warning: Could not clear ChromaDB: {e}")
+        else:
+            print(f"[Pipeline] Resuming indexing for existing project: {codebase_path}. Keeping existing databases.")
             
         # Step 2: Create indexes
         state.update_job(2, "Initializing graph schema...")

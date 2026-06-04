@@ -50,8 +50,8 @@ def embed_all_nodes():
     total = 0
 
     for label in labels:
-        nodes = client.run(f"MATCH (n:{label}) RETURN n")
-        batch_ids, batch_docs, batch_metas = [], [], []
+        nodes = client.run(f"MATCH (n:{label}) WHERE n.embedded IS NULL OR n.embedded = false RETURN n")
+        batch_ids, batch_docs, batch_metas, batch_names = [], [], [], []
 
         for record in nodes:
             node = dict(record["n"])
@@ -62,6 +62,7 @@ def embed_all_nodes():
             batch_ids.append(node_id)
             batch_docs.append(text)
             batch_metas.append({"type": label, "name": node.get("name", ""), "file": node.get("file", "")})
+            batch_names.append(node.get("name", ""))
 
             if len(batch_ids) >= 50:
                 try:
@@ -69,10 +70,17 @@ def embed_all_nodes():
                     collection.upsert(ids=batch_ids,
                                       metadatas=batch_metas, embeddings=vectors)
                     total += len(batch_ids)
+                    
+                    # Mark as embedded in Neo4j
+                    client.run(f"""
+                        MATCH (n:{label}) WHERE n.name IN $names
+                        SET n.embedded = true
+                    """, {"names": batch_names})
+                    
                     print(f"[Chroma] Embedded batch ({total} total)...")
                 except Exception as e:
                     print(f"[Chroma] Batch embedding error: {e}")
-                batch_ids, batch_docs, batch_metas = [], [], []
+                batch_ids, batch_docs, batch_metas, batch_names = [], [], [], []
 
         if batch_ids:
             try:
@@ -80,10 +88,16 @@ def embed_all_nodes():
                 collection.upsert(ids=batch_ids,
                                   metadatas=batch_metas, embeddings=vectors)
                 total += len(batch_ids)
+                
+                # Mark as embedded in Neo4j
+                client.run(f"""
+                    MATCH (n:{label}) WHERE n.name IN $names
+                    SET n.embedded = true
+                """, {"names": batch_names})
             except Exception as e:
                 print(f"[Chroma] Batch embedding error for final batch: {e}")
 
-    print(f"[Chroma] Embedded {total} nodes total.")
+    print(f"[Chroma] Embedded {total} new nodes total.")
 
 
 def embed_nodes_for_files(file_paths: list[str]):

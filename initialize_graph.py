@@ -349,8 +349,25 @@ def step_link_commits(commits: list, parsed_files: list, codebase_path: str):
 
 def step_extract_semantics(parsed_files: list, docs: list):
     """Step 6: LLM semantic extraction (Concepts, Features, Risks, etc.)."""
-    from extractors.llm_extractor import batch_extract
+    from graph.neo4j_client import get_client
     from graph.builder import build_semantic_nodes
+    from extractors.llm_extractor import batch_extract
+
+    # Check if we already have semantic nodes (concepts/features) in Neo4j
+    client = get_client()
+    labels = ["Concept", "Feature", "Decision", "Risk", "Task", "Module"]
+    existing_count = 0
+    try:
+        for label in labels:
+            res = client.run(f"MATCH (n:{label}) RETURN count(n) as cnt")
+            if res:
+                existing_count += res[0]["cnt"]
+    except Exception as e:
+        print(f"[Pipeline] Warning checking existing semantic nodes: {e}")
+
+    if existing_count > 10:
+        print(f"[Pipeline] Found {existing_count} existing semantic nodes. Skipping LLM semantic extraction (Resume Mode).")
+        return
 
     significant_files = [
         pf for pf in parsed_files
