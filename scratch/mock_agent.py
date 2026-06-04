@@ -5,6 +5,10 @@ Mock Test Generation Agent Simulator
 Simulates how a third-party autonomous test-generation agent integrates
 with the GraphRAG REST API to perform test planning, context gathering,
 test generation simulation, and coverage synchronization.
+
+This script is self-contained and acts as a pure HTTP client to connect to the
+remote GraphRAG server. It can be run from the root of any separate project
+that the user wishes to build a graph upon.
 """
 
 import os
@@ -21,19 +25,15 @@ if sys.platform.startswith("win"):
     except Exception:
         pass
 
-# Suppress noisy warnings and logger notifications from the neo4j driver
-import logging
-import warnings
-logging.getLogger("neo4j").setLevel(logging.ERROR)
-warnings.filterwarnings("ignore")
-
 # Load env variables from root directory
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
 # Server configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8080")
 API_KEY = os.getenv("API_KEY", "")
-TARGET_REPO_URL = os.getenv("CODEBASE_PATH", "../demo-project")
+
+# The agent runs from the target project. Default TARGET_REPO_URL to current working directory.
+TARGET_REPO_URL = os.getenv("CODEBASE_PATH", os.getcwd())
 
 # Headers for API authentication
 headers = {
@@ -45,144 +45,41 @@ if API_KEY:
 print("==================================================")
 print("🚀 STARTING MOCK TEST GENERATION AGENT SIMULATOR")
 print("==================================================")
-
-def start_live_server_if_needed():
-    global API_BASE_URL
-    # If API_BASE_URL is configured to a remote server, bypass local startup
-    if "localhost" not in API_BASE_URL and "127.0.0.1" not in API_BASE_URL:
-        print(f"📡 API_BASE_URL is remote: {API_BASE_URL}. Connecting directly without starting local server.\n")
-        return
-        
-    import socket
-    import threading
-    import time
-    
-    # Ensure root path is in sys.path
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if root_dir not in sys.path:
-        sys.path.insert(0, root_dir)
-        
-    # Check if Neo4j is running and has any functions
-    cnt = 0
-    try:
-        from graph.neo4j_client import get_client
-        neo4j_client = get_client()
-        result = neo4j_client.run("MATCH (f:Function) RETURN count(f) as cnt")
-        cnt = result[0]["cnt"] if result else 0
-    except Exception as e:
-        print(f"ℹ️  Could not query Neo4j database: {e}")
-        
-    if cnt == 0:
-        print("ℹ️  Neo4j database is empty or offline. Falling back to offline simulation.")
-        return
-        
-    print(f"🟢 Found {cnt} pre-indexed functions in the real Neo4j graph database!")
-    
-    # Check if a server is already listening on port 8080 or if it's occupied
-    def find_free_port(start_port=8081):
-        port = start_port
-        while True:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                if s.connect_ex(('127.0.0.1', port)) != 0:
-                    return port
-                port += 1
-                
-    port = find_free_port(8081)
-    print(f"⚙️  Starting real FastAPI GraphRAG server in a background thread on port {port}...")
-    
-    # Inject override to skip full LLM processing since the graph is already built
-    try:
-        import server.pipeline
-        import server.state
-        
-        def mock_run_pipeline_async(repo_url, language=""):
-            state = server.state.get_state()
-            job_id = "job_real_graph_fast_track"
-            state.current_job = {
-                "job_id": job_id,
-                "status": "success",
-                "progress": 100,
-                "step": 9,
-                "total_steps": 9,
-                "message": f"Pipeline complete (fast-tracked: found {cnt} pre-indexed functions)."
-            }
-            state.set_first_run(total_functions=cnt, codebase_path=repo_url)
-            return job_id
-            
-        server.pipeline.run_pipeline_async = mock_run_pipeline_async
-        print("💡  Successfully injected pipeline fast-track (skipping re-indexing since graph exists).")
-        
-        # Monkeypatch get_client to automatically translate queries
-        import graph.neo4j_client
-        original_get_client = graph.neo4j_client.get_client
-        
-        class QueryTranslatingClient:
-            def __init__(self, original_client):
-                self.original_client = original_client
-                
-            def run(self, query, params=None):
-                # Translate CHANGED to MODIFIED for schema compatibility
-                translated_query = query.replace("[:CHANGED]", "[:MODIFIED]")
-                return self.original_client.run(translated_query, params)
-                
-            def __getattr__(self, name):
-                return getattr(self.original_client, name)
-                
-        def wrapped_get_client():
-            client = original_get_client()
-            return QueryTranslatingClient(client)
-            
-        graph.neo4j_client.get_client = wrapped_get_client
-        print("💡  Successfully injected query translation (mapping :CHANGED to :MODIFIED relationships).")
-    except Exception as e:
-        print(f"⚠️  Failed to override pipeline/client: {e}")
-        
-    # Start uvicorn
-    def run_uvicorn():
-        try:
-            import uvicorn
-            from server.api import app as server_app
-            uvicorn.run(server_app, host="127.0.0.1", port=port, log_level="warning")
-        except Exception as e:
-            print(f"❌ Background server failed to start: {e}")
-            
-    t = threading.Thread(target=run_uvicorn, daemon=True)
-    t.start()
-    
-    # Wait for the server to spin up
-    print("⏳ Waiting for background API server to start responding...")
-    server_ready = False
-    for _ in range(30):
-        try:
-            r = requests.get(f"http://127.0.0.1:{port}/api/health", timeout=0.5, proxies={"http": None, "https": None})
-            if r.status_code == 200:
-                server_ready = True
-                break
-        except Exception:
-            pass
-        time.sleep(0.5)
-        
-    # Update API_BASE_URL to point to our live local server
-    API_BASE_URL = f"http://127.0.0.1:{port}"
-    if server_ready:
-        print(f"🟢 Real API server is up and responding! API URL updated to: {API_BASE_URL}\n")
-    else:
-        print(f"⚠️  Real API server did not respond. API URL set to: {API_BASE_URL}\n")
-
-start_live_server_if_needed()
-
 print(f"API Base URL: {API_BASE_URL}")
 print(f"Target Repo:  {TARGET_REPO_URL}")
 print("==================================================\n")
 
 # Global state for simulating stateful polling in offline mode
 _poll_count = 0
+_offline_mode = None
 
 def get_mock_response(method, endpoint, json_data=None, params=None):
     """Generates mock JSON responses representing the verified GraphRAG schema."""
     global _poll_count
     
-    if endpoint == "/api/repo/init":
+    if endpoint == "/api/health":
+        if _poll_count == 0:
+            return {
+                "status": "ok",
+                "mode": "IDLE",
+                "total_functions": 0,
+                "queued_commits": 0,
+                "last_sync": None,
+                "current_job": None,
+                "codebase_path": None
+            }
+        else:
+            return {
+                "status": "ok",
+                "mode": "ONGOING",
+                "total_functions": 3,
+                "queued_commits": 0,
+                "last_sync": {"commit": "a1b2c3d", "time": "2026-06-04T15:00:00"},
+                "current_job": None,
+                "codebase_path": TARGET_REPO_URL
+            }
+            
+    elif endpoint == "/api/repo/init":
         return {"job_id": "job_mock_12345", "status": "queued"}
         
     elif endpoint.startswith("/api/repo/status/"):
@@ -366,14 +263,11 @@ def get_valid_commit_hash(repo_path):
         return "a1b2c3d"
 
 
-_offline_mode = None
-
 def call_api(method, endpoint, json_data=None, params=None):
     """Helper to perform requests with error handling, retries, and offline fallback."""
     global _offline_mode
     url = f"{API_BASE_URL}{endpoint}"
     
-    # If already determined to be offline, return mock response directly
     if _offline_mode is True:
         return get_mock_response(method, endpoint, json_data, params)
         
@@ -387,7 +281,6 @@ def call_api(method, endpoint, json_data=None, params=None):
             else:
                 raise ValueError(f"Unsupported method: {method}")
             
-            # Check authorization failure first
             if r.status_code == 401:
                 print("❌ Authentication failed. Check your API_KEY in .env.")
                 sys.exit(1)
@@ -403,32 +296,10 @@ def call_api(method, endpoint, json_data=None, params=None):
                 except Exception:
                     pass
 
-            # Determine mode on the first call to the server
-            if _offline_mode is None:
-                if r.status_code == 404:
-                    _offline_mode = True
-                    print("⚠️  GraphRAG Server returned 404 on init. Visualizer backend might be running on this port.")
-                    print("💡  Switching to OFFLINE MOCK SIMULATION MODE (no server required)...")
-                    print("--------------------------------------------------")
-                    return get_mock_response(method, endpoint, json_data, params)
-                else:
-                    _offline_mode = False
-                    print("🟢 Connected to live GraphRAG Server. Running in ONLINE mode.")
-                    print("--------------------------------------------------")
-                    
             r.raise_for_status()
             return r.json()
             
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError) as e:
-            # If we haven't determined the mode yet, fallback to offline on the first failure
-            if _offline_mode is None:
-                _offline_mode = True
-                print(f"⚠️  GraphRAG Server not responding. Error details: {e}")
-                print("💡  Switching to OFFLINE MOCK SIMULATION MODE (no server required)...")
-                print("--------------------------------------------------")
-                return get_mock_response(method, endpoint, json_data, params)
-            
-            # Otherwise, if we are in online mode, retry on transient network errors
             if attempt < max_retries - 1:
                 print(f"⚠️  Transient network error on {endpoint}: {e}. Retrying in 3 seconds (attempt {attempt + 2}/{max_retries})...")
                 time.sleep(3)
@@ -436,55 +307,103 @@ def call_api(method, endpoint, json_data=None, params=None):
                 print(f"❌ API Call to {endpoint} failed after {max_retries} attempts: {e}")
                 sys.exit(1)
         except requests.exceptions.RequestException as e:
-            # For other HTTP/Request errors, fail immediately or fallback
-            if _offline_mode is None:
-                _offline_mode = True
-                print(f"⚠️  GraphRAG Server not responding. Error details: {e}")
-                print("💡  Switching to OFFLINE MOCK SIMULATION MODE (no server required)...")
-                print("--------------------------------------------------")
-                return get_mock_response(method, endpoint, json_data, params)
-            else:
-                print(f"❌ API Call to {endpoint} failed: {e}")
-                sys.exit(1)
+            print(f"❌ API Call to {endpoint} failed: {e}")
+            sys.exit(1)
+
 
 # ─────────────────────────────────────────────────────────────
-# Phase 1: Initialize Pipeline and Poll Status
+# Phase 1: Connect and Check for Existing Graph
 # ─────────────────────────────────────────────────────────────
-print("[Phase 1] Initializing codebase analysis...")
-init_resp = call_api("POST", "/api/repo/init", {"repo_url": TARGET_REPO_URL})
-if isinstance(init_resp, dict) and init_resp.get("status") == "conflict":
-    print("⚠️  A codebase analysis pipeline is already running on the server.")
-    print("📡 Querying server health to find the active job...")
-    health_resp = call_api("GET", "/api/health")
-    current_job = health_resp.get("current_job")
-    if current_job and current_job.get("job_id"):
-        job_id = current_job["job_id"]
-        print(f"✔️ Connected to active job: {job_id}")
+print("[Phase 1] Connecting to remote GraphRAG server...")
+
+# First connection check to determine if server is online
+try:
+    resp = requests.get(f"{API_BASE_URL}/api/health", headers=headers, timeout=5)
+    if resp.status_code == 200:
+        _offline_mode = False
+        health_data = resp.json()
+        print("🟢 Connected to live GraphRAG Server. Running in ONLINE mode.")
+        print("--------------------------------------------------")
     else:
-        print("❌ Could not retrieve active job ID. Exiting.")
-        sys.exit(1)
-else:
-    job_id = init_resp.get("job_id")
-    print(f"✔️ Analysis job queued successfully. Job ID: {job_id}")
+        raise ValueError(f"HTTP {resp.status_code}")
+except Exception as e:
+    _offline_mode = True
+    print(f"⚠️  GraphRAG Server not responding at {API_BASE_URL} ({e}).")
+    print("💡  Switching to OFFLINE MOCK SIMULATION MODE (no server required)...")
+    print("--------------------------------------------------")
+    health_data = get_mock_response("GET", "/api/health")
 
-print("Polling analysis status...")
-while True:
-    status_resp = call_api("GET", f"/api/repo/status/{job_id}")
-    progress = status_resp.get("progress", 0)
-    step = status_resp.get("step", "?/?")
-    msg = status_resp.get("message", "")
-    status = status_resp.get("status", "running")
+server_mode = health_data.get("mode", "IDLE")
+server_repo = health_data.get("codebase_path")
+current_job = health_data.get("current_job")
+
+# Check if a graph has already been built for this codebase on the server
+graph_exists = False
+if server_mode in ("FIRST_RUN", "ONGOING") and server_repo:
+    # Normalize paths to compare
+    norm_server = os.path.abspath(server_repo).lower() if not server_repo.startswith("http") else server_repo.lower()
+    norm_target = os.path.abspath(TARGET_REPO_URL).lower() if not TARGET_REPO_URL.startswith("http") else TARGET_REPO_URL.lower()
+    if norm_server == norm_target:
+        graph_exists = True
+
+job_id = None
+if not graph_exists:
+    print("ℹ️  No codebase graph has been built on the server for this repository yet.")
+    print("🚀 Triggering new repository ingestion pipeline...")
+    init_resp = call_api("POST", "/api/repo/init", {"repo_url": TARGET_REPO_URL})
     
-    print(f"  └─► Progress: {progress}% | Step: {step} | Current: {msg}")
-    
-    if status in ("success", "done", "complete"):
-        print("✔️ Codebase analysis complete!\n")
-        break
-    elif status == "failed":
-        print("❌ Codebase analysis pipeline failed.")
-        sys.exit(1)
-    
-    time.sleep(3)
+    if isinstance(init_resp, dict) and init_resp.get("status") == "conflict":
+        print("⚠️  A codebase analysis pipeline is already running on the server.")
+        if current_job and current_job.get("job_id"):
+            job_id = current_job["job_id"]
+            print(f"✔️ Connected to active job: {job_id}")
+        else:
+            # Re-fetch health to get job ID
+            health_resp = call_api("GET", "/api/health")
+            current_job = health_resp.get("current_job")
+            if current_job and current_job.get("job_id"):
+                job_id = current_job["job_id"]
+                print(f"✔️ Connected to active job: {job_id}")
+            else:
+                print("❌ Could not retrieve active job ID. Exiting.")
+                sys.exit(1)
+    else:
+        job_id = init_resp.get("job_id")
+        print(f"✔️ Analysis job queued successfully. Job ID: {job_id}")
+else:
+    print(f"✔️ Found existing graph for this repository on the server ({server_mode} mode).")
+    if server_mode == "FIRST_RUN":
+        # If ingestion is still in progress, attach to it
+        if current_job and current_job.get("job_id"):
+            job_id = current_job["job_id"]
+            print(f"✔️ Ingestion is still in progress (Job: {job_id}). Reconnecting...")
+
+if job_id:
+    print("Polling analysis status...")
+    last_line = ""
+    while True:
+        status_resp = call_api("GET", f"/api/repo/status/{job_id}")
+        progress = status_resp.get("progress", 0)
+        step = status_resp.get("step", "?/?")
+        msg = status_resp.get("message", "")
+        status = status_resp.get("status", "running")
+        
+        current_line = f"  └─► Progress: {progress}% | Step: {step} | Current: {msg}"
+        if current_line != last_line:
+            sys.stdout.write(f"\r{current_line:<100}")
+            sys.stdout.flush()
+            last_line = current_line
+        
+        if status in ("success", "done", "complete"):
+            print("\n✔️ Codebase analysis complete!\n")
+            break
+        elif status == "failed":
+            print("\n❌ Codebase analysis pipeline failed.")
+            sys.exit(1)
+        
+        time.sleep(3)
+else:
+    print("✔️ Skipping ingestion pipeline (graph is already fully built).\n")
 
 # ─────────────────────────────────────────────────────────────
 # Phase 2: Fetch Codebase Snapshot and Build Queue
@@ -494,7 +413,17 @@ snapshot = call_api("POST", "/api/repo/snapshot")
 total_functions = snapshot.get("total", 0)
 communities = snapshot.get("communities", [])
 
-print(f"✔️ Found {total_functions} functions across {len(communities)} communities.")
+# Analyze existing coverage
+all_functions = []
+for comm in communities:
+    for func in comm.get("functions", []):
+        all_functions.append(func)
+
+existing_test_count = sum(1 for f in all_functions if f.get("has_test", False))
+coverage_pct = (existing_test_count / total_functions * 100) if total_functions > 0 else 0.0
+
+print(f"✔️ Found {total_functions} total functions across {len(communities)} communities.")
+print(f"📊 Existing Coverage: {existing_test_count}/{total_functions} functions ({coverage_pct:.1f}%) already have tests in the graph.")
 
 # Build testing queue: find functions that do not have tests yet, sorted by priority_score
 test_queue = []
@@ -509,11 +438,16 @@ for comm in communities:
 # Sort queue globally by priority_score descending (highest risk/coupling first)
 test_queue.sort(key=lambda x: x.get("priority_score") if x.get("priority_score") is not None else 0, reverse=True)
 
-print(f"✔️ Identified {len(test_queue)} functions lacking tests queue:")
-for i, f in enumerate(test_queue):
-    score_val = f.get('priority_score')
-    score_display = score_val if score_val is not None else 0
-    print(f"  {i+1}. {f['name']} (File: {f['file']}, Score: {score_display}, Community: {f['community_name']})")
+if test_queue:
+    print(f"✔️ Identified {len(test_queue)} functions lacking tests. Target backlog:")
+    for i, f in enumerate(test_queue[:5]):  # Show up to top 5
+        score_val = f.get('priority_score')
+        score_display = score_val if score_val is not None else 0
+        print(f"  {i+1}. {f['name']} (File: {f['file']}, Score: {score_display}, Community: {f['community_name']})")
+    if len(test_queue) > 5:
+        print(f"  ... and {len(test_queue) - 5} more.")
+else:
+    print("🎉 All functions already have tests! Zero backlog remaining.")
 print("")
 
 # ─────────────────────────────────────────────────────────────
@@ -528,7 +462,6 @@ for func in test_queue[:2]:
     print(f"--- Processing Function: {name} ({file_path}) ---")
     
     # Retrieve detailed context (source code, mocks, edge cases, class constructors)
-    # Uses 'file' parameter to avoid duplicate namespace conflicts if supported
     params = {"file": file_path}
     context = call_api("GET", f"/api/context/{name}", params=params)
     
