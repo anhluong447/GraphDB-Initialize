@@ -4,10 +4,22 @@ from graph.neo4j_client import get_client
 from config import CHROMA_PATH, EMBEDDING_DIMENSIONS
 
 chroma = chromadb.PersistentClient(path=CHROMA_PATH)
-collection = chroma.get_or_create_collection(
-    "graphrag_nodes",
-    metadata={"hnsw:space": "cosine", "dimension": EMBEDDING_DIMENSIONS}
-)
+
+class CollectionProxy:
+    @property
+    def _collection(self):
+        return chroma.get_or_create_collection(
+            "graphrag_nodes",
+            metadata={"hnsw:space": "cosine", "dimension": EMBEDDING_DIMENSIONS}
+        )
+    def upsert(self, *args, **kwargs):
+        return self._collection.upsert(*args, **kwargs)
+    def delete(self, *args, **kwargs):
+        return self._collection.delete(*args, **kwargs)
+    def query(self, *args, **kwargs):
+        return self._collection.query(*args, **kwargs)
+
+collection = CollectionProxy()
 
 
 def embed_all_nodes():
