@@ -130,3 +130,80 @@ from query.engine import query_codebase
 response = query_codebase("How does the authenticating flow work?")
 print(response["answer"])
 ```
+
+---
+
+## 🖥️ Server Mode (Knowledge Base API Server) 🌐
+
+GraphRAG can run as a standalone API server to decouple the database from client codebases. This exposes REST endpoints designed for autonomous testing agents (Mô hình A).
+
+### 1. Setup Server Mode
+In your `.env` file, configure the server options:
+```env
+# Enable server mode (centralizes storage inside ./server_data/)
+SERVER_MODE=true
+
+# Secure your endpoints with an API key (requests must pass X-API-Key header)
+API_KEY=your-secret-api-key-here
+
+# Directory on the server where repositories will be cloned
+WORKSPACE_DIR=./workspace
+
+# Optional: Webhook URL of the Auto-Test Agent to notify on pipeline changes
+WEBHOOK_URL=
+```
+
+### 2. Start the Server
+Start the Uvicorn-based FastAPI server (which automatically boots Neo4j and ChromaDB):
+```bash
+# On Windows, double-click:
+.\start_server.bat
+
+# Or run via Python:
+python start_server.py --port 8080
+```
+API Documentation will be accessible at: `http://localhost:8080/docs`
+
+### 3. API Endpoints Reference (DA01 Spec)
+
+| Mode | Endpoint | Method | Description |
+|---|---|---|---|
+| **FIRST_RUN** | `/api/repo/init` | `POST` | Initialize codebase from local path or remote Git URL. Runs async pipeline. |
+| **FIRST_RUN** | `/api/repo/status/{job_id}` | `GET` | Get status and progress percentage of initialization pipeline. |
+| **FIRST_RUN** | `/api/repo/snapshot` | `POST` | Return all parsed functions grouped by community with computed `priority_score`. |
+| **FIRST_RUN** | `/api/first_run/complete` | `POST` | Mark test generation finished, switch server to `ONGOING` mode, flush commit queue. |
+| **ONGOING** | `/api/changes` | `GET` | Get list of functions changed by a specific commit hash and its risk level. |
+| **BOTH** | `/api/context/{name}` | `GET` | Retrieve full subgraph context, docstrings, source code, and AI test specs. |
+| **BOTH** | `/api/functions` | `GET` | List all indexed functions with optional filters. |
+| **BOTH** | `/api/test/done` | `POST` | Mark a function as tested (`has_test = true` flag updated in Neo4j). |
+| **BOTH** | `/api/git-sync` | `POST` | Webhook triggered on Git Push events. Executes background incremental sync. |
+| **BOTH** | `/api/health` | `GET` | Verify server status, DB connections, and current operating mode. |
+
+### 4. Client Integration Examples
+
+#### Initialize Codebase
+```bash
+curl -X POST http://localhost:8080/api/repo/init \
+  -H "X-API-Key: your-secret-api-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{"repo_url": "https://github.com/example/demo-project.git", "language": "python"}'
+```
+
+#### Poll Status
+```bash
+curl http://localhost:8080/api/repo/status/job-123456 \
+  -H "X-API-Key: your-secret-api-key-here"
+```
+
+#### Get Snapshot
+```bash
+curl -X POST http://localhost:8080/api/repo/snapshot \
+  -H "X-API-Key: your-secret-api-key-here"
+```
+
+#### Get Function Context
+```bash
+curl http://localhost:8080/api/context/process_payment \
+  -H "X-API-Key: your-secret-api-key-here"
+```
+

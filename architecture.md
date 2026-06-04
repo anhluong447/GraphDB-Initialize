@@ -97,6 +97,15 @@ Provides context for LLM answering:
 - **Frontend Dashboard**: A React application using `react-force-graph-2d` and D3 Force layout. Includes edge filtering to prevent rendering crashes on dangling graph connections.
 - **MCP Server**: Implements the Model Context Protocol (MCP), allowing external AI assistants (like Claude Desktop) to use this GraphRAG system as a tool server.
 
+### 2.8 Standalone Knowledge Base API Server Mode (`server/`)
+The system can run as a centralized standalone API Server (Mô hình A), exposing REST APIs for autonomous agents (e.g. Auto-Test Agents) to dynamically query graph metadata.
+- **State Machine Engine (`server/state.py`)**: Coordinates the server through two operational states:
+  - **`FIRST_RUN`**: Initial pipeline is running or completed. Codebase is fully indexed. Webhook deliveries for new changes are deferred and queued.
+  - **`ONGOING`**: Pipeline is fully synchronized, code is stable, and commits are monitored. Code modifications trigger instant webhook delivery to the agent.
+- **Async Pipeline Runner (`server/pipeline.py`)**: Executes codebase parsing, schema generation, embedding generation, semantic extraction, and community clustering in a non-blocking background thread with active status/step polling.
+- **API Engine (`server/api.py`)**: Exposes REST endpoints (`/api/repo/init`, `/api/repo/status`, `/api/repo/snapshot`, `/api/first_run/complete`, `/api/changes`, `/api/context/{name}`, `/api/test/done`, `/api/git-sync`) protected by an optional header-based API key checking middleware (`X-API-Key`).
+- **Data Isolation**: Isolates databases inside a centralized `./server_data/` directory rather than inside client codebases when running in server mode.
+
 ---
 
 ## 3. Database Schemas
@@ -121,6 +130,7 @@ Stores syntactic and semantic context for a function or method.
 - **`output_spec`**: (AI-enriched) Return type specifications.
 - **`edge_cases`**: (AI-enriched) JSON array of boundary cases.
 - **`test_recommendations`**: (AI-enriched) JSON array of mock suggestions and test cases (strictly follows schema `{"type": "mock"|"test_case", ...}`).
+- **`has_test`**: Boolean flag indicating if this function has passed test-case verification (defaults to `false`, managed via `/api/test/done`).
 
 ### 3.2 Class Node Schema (`:Class`)
 Stores structural information about a class.
@@ -146,7 +156,9 @@ Stores imports references.
 D:\GraphRAG/
 ├── config.py                 # System configuration and environment loader
 ├── docker-compose.yml        # Multi-container orchestration (Neo4j, ChromaDB)
-├── start_all.bat             # 1-Click launcher script for Windows developers
+├── start_all.bat             # 1-Click launcher script for Windows developers (Subsystem mode)
+├── start_server.py           # Python runner for Knowledge Base API Server
+├── start_server.bat          # 1-Click launcher script for API Server
 ├── .env                      # Local environment configurations (ignored in git)
 ├── initialize_graph.py       # Main entry point for full init / incremental sync
 ├── parsers/                  # Code and Git history parsers (upgraded rich AST)
@@ -154,23 +166,35 @@ D:\GraphRAG/
 ├── community/                # Graph clustering and community summarization
 ├── query/                    # Hybrid search and context synthesis engine
 ├── updater/                  # Filesystem Watcher and Git Hooks
-├── visualization/            # FastAPI Backend & React Frontend Dashboard
+├── server/                   # Standalone API Server logic (endpoints, state, async runner)
+├── visualization/            # FastAPI Backend & React Frontend Dashboard (Visualizer)
 ├── mcp/                      # Model Context Protocol TS/JS server
 └── scratch/                  # Test scripts and development playground
 ```
 
-*Note: All data storage (Neo4j databases and ChromaDB vector databases) are stored inside the target codebase's local `.graphrag_data/` directory to ensure workspace isolation.*
+*Note: In subsystem mode, database folders are kept in the codebase `.graphrag_data/`. In server mode, databases and state files are isolated in `./server_data/`.*
 
 ---
 
 ## 5. Operational Workflows
 
-### Starting the System
+### Starting the System (Subsystem Mode)
 Double-click `start_all.bat` or run:
 ```powershell
 .\start_all.bat
 ```
 This boots up the databases in Docker, runs the FastAPI backend on port `8080`, launches the React explorer on port `5173`, and turns on the background file change watcher.
+
+### Starting the System (API Server Mode)
+To run the standalone Knowledge Base Server, ensure `SERVER_MODE=true` is set in `.env` and run:
+```powershell
+.\start_server.bat
+```
+or launch Python directly:
+```powershell
+python start_server.py --port 8080
+```
+This launches a FastAPI server on port `8080` exposing the API endpoints for external test agents.
 
 ### Graph Inspection
 You can quickly inspect the status and size of the graph database by running:

@@ -2,6 +2,8 @@ venv/
 chroma_db/
 data/
 .graphrag_data/
+server_data/
+workspace/
 __pycache__/
 *.pyc
 .env
@@ -11,3 +13,5 @@ build/
 *.log
 .DS_Store
 updates/
+demo_project/
+scratch/

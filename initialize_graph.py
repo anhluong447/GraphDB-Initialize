@@ -304,52 +304,53 @@ def _get_changed_files(repo_path: str, last_commit_hash: str) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════
-# Full Initialization Pipeline
+# Pipeline Step Functions (reusable by server/pipeline.py)
 # ═══════════════════════════════════════════════════════════
 
-def run_full_init():
-    """Run the complete initialization pipeline from scratch."""
-    print("=" * 60)
-    print("GraphRAG — Full Initialization")
-    print("=" * 60)
-    print(f"Target codebase : {CODEBASE_PATH}")
-    print(f"Data directory  : {GRAPHRAG_DATA_DIR}")
-
+def step_start_databases():
+    """Step 1: Start Docker databases and wait for Neo4j."""
     _ensure_data_dirs()
-
-    # 1. Start Docker
-    print("\n[1/8] Starting databases...")
     _start_docker()
 
-    # 2. Init graph indexes
-    print("\n[2/8] Initializing graph schema...")
+
+def step_create_indexes():
+    """Step 2: Create Neo4j indexes."""
     from graph.neo4j_client import get_client
     client = get_client()
     client.create_indexes()
+    return client
 
-    # 3. Parse codebase
-    print("\n[3/8] Parsing codebase...")
+
+def step_parse_codebase(codebase_path: str) -> dict:
+    """Step 3: Parse codebase AST, docs, and git history. Returns parsed data."""
     from parsers.ast_parser import parse_codebase
     from parsers.doc_parser import parse_docs
     from parsers.git_parser import parse_git_history
 
-    parsed_files = parse_codebase(CODEBASE_PATH)
-    docs = parse_docs(CODEBASE_PATH)
-    commits = parse_git_history(CODEBASE_PATH, max_commits=200)
+    parsed_files = parse_codebase(codebase_path)
+    docs = parse_docs(codebase_path)
+    commits = parse_git_history(codebase_path, max_commits=200)
 
-    # 4. Build structural graph
-    print("\n[4/8] Building structural graph...")
-    from graph.builder import build_file_nodes, build_git_nodes, build_semantic_nodes, link_commits_to_functions
+    return {"parsed_files": parsed_files, "docs": docs, "commits": commits}
+
+
+def step_build_graph(parsed_files: list, commits: list):
+    """Step 4: Build structural graph nodes (File, Function, Class, Commit, Person)."""
+    from graph.builder import build_file_nodes, build_git_nodes
     build_file_nodes(parsed_files)
     build_git_nodes(commits)
 
-    # 4b. Link commits to functions they changed
-    print("\n[4b/8] Linking commits to changed functions...")
-    link_commits_to_functions(commits, parsed_files, CODEBASE_PATH)
 
-    # 5. LLM extraction
-    print("\n[5/8] Extracting semantic entities (LLM)...")
+def step_link_commits(commits: list, parsed_files: list, codebase_path: str):
+    """Step 5: Link commits to the specific functions they changed."""
+    from graph.builder import link_commits_to_functions
+    link_commits_to_functions(commits, parsed_files, codebase_path)
+
+
+def step_extract_semantics(parsed_files: list, docs: list):
+    """Step 6: LLM semantic extraction (Concepts, Features, Risks, etc.)."""
     from extractors.llm_extractor import batch_extract
+    from graph.builder import build_semantic_nodes
 
     significant_files = [
         pf for pf in parsed_files
@@ -364,22 +365,68 @@ def run_full_init():
     extracted = batch_extract(all_chunks)
     build_semantic_nodes(extracted)
 
-    # 6. Embed nodes
-    print("\n[6/8] Embedding nodes...")
+
+def step_embed_nodes():
+    """Step 7: Embed all nodes to ChromaDB vector store."""
     from embeddings.chroma_client import embed_all_nodes
     embed_all_nodes()
 
-    # 7. AI Testing Enrichment
-    print("\n[7/8] Enriching functions with AI test specs...")
+
+def step_enrich_functions():
+    """Step 8: AI Testing Enrichment — generate test specs for functions."""
     from extractors.testing_enricher import enrich_all_functions
     enrich_all_functions()
 
-    # 8. Community detection
-    print("\n[8/8] Detecting communities...")
+
+def step_detect_communities():
+    """Step 9: Community detection and summarization."""
     from community.detector import detect_communities
     from community.summarizer import summarize_all_communities
     detect_communities()
     summarize_all_communities()
+
+
+# ═══════════════════════════════════════════════════════════
+# Full Initialization Pipeline
+# ═══════════════════════════════════════════════════════════
+
+def run_full_init():
+    """Run the complete initialization pipeline from scratch."""
+    print("=" * 60)
+    print("GraphRAG — Full Initialization")
+    print("=" * 60)
+    print(f"Target codebase : {CODEBASE_PATH}")
+    print(f"Data directory  : {GRAPHRAG_DATA_DIR}")
+
+    print("\n[1/9] Starting databases...")
+    step_start_databases()
+
+    print("\n[2/9] Initializing graph schema...")
+    step_create_indexes()
+
+    print("\n[3/9] Parsing codebase...")
+    parsed_data = step_parse_codebase(CODEBASE_PATH)
+    parsed_files = parsed_data["parsed_files"]
+    docs = parsed_data["docs"]
+    commits = parsed_data["commits"]
+
+    print("\n[4/9] Building structural graph...")
+    step_build_graph(parsed_files, commits)
+
+    print("\n[5/9] Linking commits to changed functions...")
+    step_link_commits(commits, parsed_files, CODEBASE_PATH)
+
+    print("\n[6/9] Extracting semantic entities (LLM)...")
+    step_extract_semantics(parsed_files, docs)
+
+    print("\n[7/9] Embedding nodes...")
+    step_embed_nodes()
+
+    print("\n[8/9] Enriching functions with AI test specs...")
+    step_enrich_functions()
+
+    print("\n[9/9] Detecting communities...")
+    step_detect_communities()
 
     # Save sync state
     head = _get_head_commit(CODEBASE_PATH)
