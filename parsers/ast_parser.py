@@ -55,6 +55,163 @@ LANGUAGE_MAP = {
 }
 
 
+def _parse_php_file_regex(file_path: str, source_bytes: bytes) -> dict:
+    """
+    Fallback regex parser for PHP files.
+    Extracts classes, methods, functions, and function calls.
+    """
+    code = source_bytes.decode("utf-8", errors="ignore")
+    lines = code.splitlines()
+    
+    nodes = []
+    imports = []
+    
+    # 1. Extract imports (use, require, include)
+    use_matches = re.finditer(r'^\s*use\s+([^;]+);', code, re.MULTILINE)
+    for m in use_matches:
+        full_path = m.group(1).strip()
+        parts = full_path.split('\\')
+        root_mod = parts[0] if parts else ""
+        imports.append({
+            "module": root_mod,
+            "full_path": full_path,
+            "alias": "",
+            "names": [parts[-1]] if parts else [],
+            "is_external": True,
+            "is_stdlib": False,
+            "source_file": file_path,
+        })
+        
+    # 2. Extract classes and functions
+    # Regex to find class declarations
+    class_matches = list(re.finditer(r'(?:abstract\s+|final\s+)?class\s+(\w+)', code))
+    
+    # Regex to find functions / methods: function name(args)
+    # Handles visibility modifiers (public, private, protected, static)
+    func_regex = r'(?:(public|protected|private)\s+)?(?:static\s+)?function\s+(\w+)\s*\(([^)]*)\)'
+    func_matches = list(re.finditer(func_regex, code))
+    
+    # Map index to line numbers for fast lookup
+    line_starts = []
+    curr = 0
+    for line in lines:
+        line_starts.append(curr)
+        curr += len(line) + 1 # +1 for newline
+        
+    def get_line_num(char_idx):
+        import bisect
+        return bisect.bisect_right(line_starts, char_idx)
+        
+    # Find all function calls in the code (e.g. $this->someMethod( or Class::someMethod()
+    # Extracts name of functions called
+    call_regex = r'(?:\$this->|(\w+)::)(\w+)\s*\('
+    all_calls = []
+    for m in re.finditer(call_regex, code):
+        all_calls.append(m.group(2))
+    # Standard standalone function calls: func_name(
+    for m in re.finditer(r'\b(\w+)\s*\((?!\s*function\b)', code):
+        func_called = m.group(1)
+        if func_called not in ("if", "for", "while", "foreach", "switch", "catch", "array", "isset", "empty", "unset", "count"):
+            all_calls.append(func_called)
+            
+    # Process classes
+    classes_info = []
+    for m in class_matches:
+        c_name = m.group(1)
+        start_idx = m.start()
+        start_line = get_line_num(start_idx)
+        classes_info.append({
+            "name": c_name,
+            "start_line": start_line,
+            "start_idx": start_idx
+        })
+        nodes.append({
+            "type": "class_definition",
+            "name": c_name,
+            "file": file_path,
+            "start_line": start_line,
+            "end_line": start_line + 5, # fallback length
+            "anchor": f"class {c_name}",
+            "calls": [],
+            "parent": None,
+            "is_async": False,
+            "visibility": "public",
+            "class_name": None,
+            "docstring": "",
+            "inputs": "[]",
+            "output": "",
+            "raises": "[]",
+            "complexity": 1,
+            "annotations": "[]",
+        })
+        
+    # Process functions/methods
+    for m in func_matches:
+        visibility = m.group(1) or "public"
+        f_name = m.group(2)
+        args_raw = m.group(3) or ""
+        
+        # Determine parent class if inside a class scope
+        parent_class = None
+        start_idx = m.start()
+        start_line = get_line_num(start_idx)
+        
+        for c in reversed(classes_info):
+            if start_idx > c["start_idx"]:
+                parent_class = c["name"]
+                break
+                
+        # Parse inputs
+        inputs = []
+        for arg in args_raw.split(','):
+            arg = arg.strip()
+            if arg:
+                parts = arg.split()
+                p_name = parts[-1] if parts else ""
+                p_type = " ".join(parts[:-1]) if len(parts) > 1 else ""
+                inputs.append({"name": p_name, "type": p_type})
+                
+        # Approximate raw code (from function declaration to end of method or next function)
+        raw_code = code[start_idx:start_idx + 1000] # preview limit
+        next_matches = [x.start() for x in func_matches if x.start() > start_idx]
+        if next_matches:
+            raw_code = code[start_idx:min(next_matches)]
+            
+        # Extract calls within this function's raw code
+        local_calls = []
+        for c in all_calls:
+            if c in raw_code and c != f_name:
+                local_calls.append(c)
+                
+        nodes.append({
+            "type": "method_definition" if parent_class else "function_definition",
+            "name": f_name,
+            "file": file_path,
+            "start_line": start_line,
+            "end_line": start_line + len(raw_code.splitlines()),
+            "anchor": m.group(0),
+            "calls": list(set(local_calls)),
+            "parent": parent_class,
+            "is_async": False,
+            "visibility": visibility,
+            "class_name": parent_class,
+            "docstring": f"PHP Function {f_name}",
+            "inputs": json.dumps(inputs),
+            "output": "",
+            "raises": "[]",
+            "complexity": 1 + raw_code.count("if") + raw_code.count("foreach") + raw_code.count("while"),
+            "annotations": "[]",
+        })
+        
+    return {
+        "file": file_path,
+        "language": "php",
+        "nodes": nodes,
+        "imports": imports,
+        "raw_code": code,
+    }
+
+
 def parse_file(file_path: str) -> dict:
     """
     Parse a single file, returns dict with:
@@ -73,6 +230,10 @@ def parse_file(file_path: str) -> dict:
             source_bytes = f.read()
     except Exception:
         return None
+
+    # Handle PHP via Regex parser fallback
+    if lang_name == "php":
+        return _parse_php_file_regex(file_path, source_bytes)
 
     parser = Parser(LANGUAGE_MAP[lang_name])
     tree = parser.parse(source_bytes)

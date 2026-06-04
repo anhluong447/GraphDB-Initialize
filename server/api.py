@@ -95,6 +95,14 @@ def repo_init(req: RepoInitRequest):
     """
     from server.pipeline import run_pipeline_async
 
+    state = get_state()
+    # Strictly block any re-initialization attempts via API
+    if state.mode != MODE_IDLE:
+        raise HTTPException(
+            status_code=409,
+            detail="Re-initialization via API is disabled to prevent data loss. The codebase has already been initialized."
+        )
+
     try:
         job_id = run_pipeline_async(repo_url=req.repo_url, language=req.language or "")
     except RuntimeError as e:

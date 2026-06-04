@@ -73,7 +73,8 @@ def extract_entities_from_chunk(chunk_text: str, chunk_meta: dict, retries: int 
             response = client.chat.completions.create(
                 model=LLM_MODEL,
                 max_tokens=4000,
-                messages=messages
+                messages=messages,
+                timeout=30.0,
             )
             content = response.choices[0].message.content
             if content is None:
@@ -119,7 +120,8 @@ Return ONLY valid JSON:
         response = client.chat.completions.create(
             model=LLM_MODEL,
             max_tokens=500,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30.0,
         )
         content = response.choices[0].message.content
         if content is None:
@@ -132,7 +134,7 @@ Return ONLY valid JSON:
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
-def batch_extract(chunks: list[dict], batch_size: int = 10) -> list[dict]:
+def batch_extract(chunks: list[dict], batch_size: int = 15) -> list[dict]:
     """Extract entities from list of chunks in parallel with progress logging."""
     results = []
     lock = threading.Lock()

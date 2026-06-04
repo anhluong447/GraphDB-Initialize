@@ -150,7 +150,13 @@ def build_semantic_nodes(extraction_results: list[dict]):
     rel_count = 0
 
     for result in extraction_results:
+        # Protect against non-dictionary results
+        if not isinstance(result, dict):
+            continue
+            
         for entity in result.get("entities", []):
+            if not isinstance(entity, dict) or "name" not in entity:
+                continue
             label = entity.get("type", "Concept")
             # Sanitize label to prevent injection
             if label not in ("Feature", "Concept", "Decision", "Risk", "Task", "Module"):
@@ -162,6 +168,8 @@ def build_semantic_nodes(extraction_results: list[dict]):
             entity_count += 1
 
         for rel in result.get("relations", []):
+            if not isinstance(rel, dict):
+                continue
             from_name = rel.get("from", "")
             to_name = rel.get("to", "")
             relation = rel.get("relation", "relates_to").upper()

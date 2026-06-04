@@ -44,6 +44,7 @@ SUPPORTED_LANGUAGES = {
     ".ts": "typescript",
     ".jsx": "javascript",
     ".tsx": "typescript",
+    ".php": "php",
 }
 
 # Directories to skip during parsing
