@@ -14,4 +14,5 @@ build/
 .DS_Store
 updates/
 demo_project/
-scratch/
+scratch/*
+!scratch/mock_agent.py
