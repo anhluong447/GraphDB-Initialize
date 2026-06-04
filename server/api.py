@@ -96,11 +96,18 @@ def repo_init(req: RepoInitRequest):
     from server.pipeline import run_pipeline_async
 
     state = get_state()
-    # Strictly block any re-initialization attempts via API
-    if state.mode != MODE_IDLE:
+    # Resolve the codebase path first to compare it
+    try:
+        from server.pipeline import _resolve_codebase
+        resolved_path = _resolve_codebase(req.repo_url, req.language or "")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to resolve repository path: {str(e)}")
+
+    # Block init if already initialized and it's a DIFFERENT project
+    if state.mode != MODE_IDLE and state.codebase_path != resolved_path:
         raise HTTPException(
             status_code=409,
-            detail="Re-initialization via API is disabled to prevent data loss. The codebase has already been initialized."
+            detail="A different codebase has already been initialized. Re-initialization with a new project via API is disabled to prevent data loss."
         )
 
     try:
