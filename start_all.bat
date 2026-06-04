@@ -7,7 +7,10 @@ echo.
 
 :: 1. Detect Python Executable Path
 set PYTHON_CMD=python
-if exist ".\venv\Scripts\python.exe" (
+if exist ".\.venv\Scripts\python.exe" (
+    set PYTHON_CMD=".\.venv\Scripts\python.exe"
+    echo [GraphRAG] Using local .venv python.
+) else if exist ".\venv\Scripts\python.exe" (
     set PYTHON_CMD=".\venv\Scripts\python.exe"
     echo [GraphRAG] Using local venv python.
 ) else if exist "..\.venv\Scripts\python.exe" (
