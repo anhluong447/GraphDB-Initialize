@@ -21,6 +21,12 @@ if sys.platform.startswith("win"):
     except Exception:
         pass
 
+# Suppress noisy warnings and logger notifications from the neo4j driver
+import logging
+import warnings
+logging.getLogger("neo4j").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore")
+
 # Load env variables from root directory
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
@@ -39,6 +45,127 @@ if API_KEY:
 print("==================================================")
 print("🚀 STARTING MOCK TEST GENERATION AGENT SIMULATOR")
 print("==================================================")
+
+def start_live_server_if_needed():
+    global API_BASE_URL
+    import socket
+    import threading
+    import time
+    
+    # Ensure root path is in sys.path
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if root_dir not in sys.path:
+        sys.path.insert(0, root_dir)
+        
+    # Check if Neo4j is running and has any functions
+    cnt = 0
+    try:
+        from graph.neo4j_client import get_client
+        neo4j_client = get_client()
+        result = neo4j_client.run("MATCH (f:Function) RETURN count(f) as cnt")
+        cnt = result[0]["cnt"] if result else 0
+    except Exception as e:
+        print(f"ℹ️  Could not query Neo4j database: {e}")
+        
+    if cnt == 0:
+        print("ℹ️  Neo4j database is empty or offline. Falling back to offline simulation.")
+        return
+        
+    print(f"🟢 Found {cnt} pre-indexed functions in the real Neo4j graph database!")
+    
+    # Check if a server is already listening on port 8080 or if it's occupied
+    def find_free_port(start_port=8081):
+        port = start_port
+        while True:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                if s.connect_ex(('127.0.0.1', port)) != 0:
+                    return port
+                port += 1
+                
+    port = find_free_port(8081)
+    print(f"⚙️  Starting real FastAPI GraphRAG server in a background thread on port {port}...")
+    
+    # Inject override to skip full LLM processing since the graph is already built
+    try:
+        import server.pipeline
+        import server.state
+        
+        def mock_run_pipeline_async(repo_url, language=""):
+            state = server.state.get_state()
+            job_id = "job_real_graph_fast_track"
+            state.current_job = {
+                "job_id": job_id,
+                "status": "success",
+                "progress": 100,
+                "step": 9,
+                "total_steps": 9,
+                "message": f"Pipeline complete (fast-tracked: found {cnt} pre-indexed functions)."
+            }
+            state.set_first_run(total_functions=cnt, codebase_path=repo_url)
+            return job_id
+            
+        server.pipeline.run_pipeline_async = mock_run_pipeline_async
+        print("💡  Successfully injected pipeline fast-track (skipping re-indexing since graph exists).")
+        
+        # Monkeypatch get_client to automatically translate queries
+        import graph.neo4j_client
+        original_get_client = graph.neo4j_client.get_client
+        
+        class QueryTranslatingClient:
+            def __init__(self, original_client):
+                self.original_client = original_client
+                
+            def run(self, query, params=None):
+                # Translate CHANGED to MODIFIED for schema compatibility
+                translated_query = query.replace("[:CHANGED]", "[:MODIFIED]")
+                return self.original_client.run(translated_query, params)
+                
+            def __getattr__(self, name):
+                return getattr(self.original_client, name)
+                
+        def wrapped_get_client():
+            client = original_get_client()
+            return QueryTranslatingClient(client)
+            
+        graph.neo4j_client.get_client = wrapped_get_client
+        print("💡  Successfully injected query translation (mapping :CHANGED to :MODIFIED relationships).")
+    except Exception as e:
+        print(f"⚠️  Failed to override pipeline/client: {e}")
+        
+    # Start uvicorn
+    def run_uvicorn():
+        try:
+            import uvicorn
+            from server.api import app as server_app
+            uvicorn.run(server_app, host="127.0.0.1", port=port, log_level="warning")
+        except Exception as e:
+            print(f"❌ Background server failed to start: {e}")
+            
+    t = threading.Thread(target=run_uvicorn, daemon=True)
+    t.start()
+    
+    # Wait for the server to spin up
+    print("⏳ Waiting for background API server to start responding...")
+    server_ready = False
+    for _ in range(30):
+        try:
+            r = requests.get(f"http://127.0.0.1:{port}/api/health", timeout=0.5, proxies={"http": None, "https": None})
+            if r.status_code == 200:
+                server_ready = True
+                break
+        except Exception:
+            pass
+        time.sleep(0.5)
+        
+    # Update API_BASE_URL to point to our live local server
+    API_BASE_URL = f"http://127.0.0.1:{port}"
+    if server_ready:
+        print(f"🟢 Real API server is up and responding! API URL updated to: {API_BASE_URL}\n")
+    else:
+        print(f"⚠️  Real API server did not respond. API URL set to: {API_BASE_URL}\n")
+
+start_live_server_if_needed()
+
 print(f"API Base URL: {API_BASE_URL}")
 print(f"Target Repo:  {TARGET_REPO_URL}")
 print("==================================================\n")
@@ -192,15 +319,59 @@ def get_mock_response(method, endpoint, json_data=None, params=None):
         
     elif endpoint == "/api/first_run/complete":
         return {"status": "transitioned", "mode": "ONGOING"}
+
+    elif endpoint == "/api/git-sync":
+        return {"status": "sync_started", "codebase_path": TARGET_REPO_URL}
+
+    elif endpoint.startswith("/api/changes"):
+        return {
+            "commit": "a1b2c3d",
+            "changed_functions": [
+                {
+                    "name": "calculate_tax",
+                    "file": "utils/tax.py",
+                    "class_name": None,
+                    "complexity": 3,
+                    "has_test": False
+                }
+            ],
+            "affected_services": [
+                {"id": 5, "name": "Tax Calculations"}
+            ],
+            "risk_level": "high"
+        }
         
     return {"status": "ok"}
 
 
+def get_valid_commit_hash(repo_path):
+    """Retrieves the actual HEAD commit hash of the target repository if available."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        return result.stdout.strip()
+    except Exception:
+        return "a1b2c3d"
+
+
+_offline_mode = None
+
 def call_api(method, endpoint, json_data=None, params=None):
     """Helper to perform requests with error handling and offline fallback."""
+    global _offline_mode
     url = f"{API_BASE_URL}{endpoint}"
-    offline_mode = False
     
+    # If already determined to be offline, return mock response directly
+    if _offline_mode is True:
+        return get_mock_response(method, endpoint, json_data, params)
+        
     try:
         if method.upper() == "GET":
             r = requests.get(url, headers=headers, params=params, timeout=5)
@@ -209,24 +380,38 @@ def call_api(method, endpoint, json_data=None, params=None):
         else:
             raise ValueError(f"Unsupported method: {method}")
         
-        if r.status_code == 404:
-            offline_mode = True
-        elif r.status_code == 401:
+        # Check authorization failure first
+        if r.status_code == 401:
             print("❌ Authentication failed. Check your API_KEY in .env.")
             sys.exit(1)
-        else:
-            r.raise_for_status()
-            return r.json()
             
-    except requests.exceptions.RequestException:
-        offline_mode = True
+        # Determine mode on the first call to the server
+        if _offline_mode is None:
+            if r.status_code == 404:
+                _offline_mode = True
+                print("⚠️  GraphRAG Server returned 404 on init. Visualizer backend might be running on this port.")
+                print("💡  Switching to OFFLINE MOCK SIMULATION MODE (no server required)...")
+                print("--------------------------------------------------")
+                return get_mock_response(method, endpoint, json_data, params)
+            else:
+                _offline_mode = False
+                print("🟢 Connected to live GraphRAG Server. Running in ONLINE mode.")
+                print("--------------------------------------------------")
+                
+        r.raise_for_status()
+        return r.json()
         
-    if offline_mode:
-        if endpoint == "/api/repo/init":
-            print("⚠️  GraphRAG Server not responding or returned 404 at port 8080.")
+    except requests.exceptions.RequestException as e:
+        if _offline_mode is None:
+            _offline_mode = True
+            print(f"⚠️  GraphRAG Server not responding. Error details: {e}")
             print("💡  Switching to OFFLINE MOCK SIMULATION MODE (no server required)...")
             print("--------------------------------------------------")
-        return get_mock_response(method, endpoint, json_data, params)
+            return get_mock_response(method, endpoint, json_data, params)
+        else:
+            # If we are in online mode, fail loudly on network errors
+            print(f"❌ API Call to {endpoint} failed: {e}")
+            sys.exit(1)
 
 # ─────────────────────────────────────────────────────────────
 # Phase 1: Initialize Pipeline and Poll Status
@@ -276,11 +461,13 @@ for comm in communities:
             test_queue.append(func)
 
 # Sort queue globally by priority_score descending (highest risk/coupling first)
-test_queue.sort(key=lambda x: x.get("priority_score", 0), reverse=True)
+test_queue.sort(key=lambda x: x.get("priority_score") if x.get("priority_score") is not None else 0, reverse=True)
 
 print(f"✔️ Identified {len(test_queue)} functions lacking tests. Top 5 priority queue:")
 for i, f in enumerate(test_queue[:5]):
-    print(f"  {i+1}. {f['name']} (File: {f['file']}, Score: {f['priority_score']}, Community: {f['community_name']})")
+    score_val = f.get('priority_score')
+    score_display = score_val if score_val is not None else 0
+    print(f"  {i+1}. {f['name']} (File: {f['file']}, Score: {score_display}, Community: {f['community_name']})")
 print("")
 
 # ─────────────────────────────────────────────────────────────
@@ -299,10 +486,10 @@ for func in test_queue[:2]:
     params = {"file": file_path}
     context = call_api("GET", f"/api/context/{name}", params=params)
     
-    func_detail = context.get("function", {})
-    raw_code = func_detail.get("raw_code", "")
-    edge_cases = func_detail.get("edge_cases", [])
-    recommendations = func_detail.get("test_recommendations", [])
+    func_detail = context.get("function", {}) or {}
+    raw_code = func_detail.get("raw_code", "") or ""
+    edge_cases = func_detail.get("edge_cases", []) or []
+    recommendations = func_detail.get("test_recommendations", []) or []
     class_context = context.get("class_context", None)
     
     print(f"  • Source lines: {len(raw_code.splitlines())} lines retrieved.")
@@ -310,8 +497,8 @@ for func in test_queue[:2]:
         print(f"  • Class constructor context found for: {class_context.get('class_name')}")
     
     # Analyze outgoing call nodes to identify mock targets
-    calls_outside = context.get("calls_outside", [])
-    mock_targets = [c["name"] for c in calls_outside]
+    calls_outside = context.get("calls_outside", []) or []
+    mock_targets = [c.get("name") for c in calls_outside if isinstance(c, dict) and c.get("name")]
     print(f"  • Dependencies to mock: {mock_targets or 'None'}")
     
     # Simulate LLM test design
@@ -367,7 +554,61 @@ complete_payload = {
 }
 complete_resp = call_api("POST", "/api/first_run/complete", complete_payload)
 print(f"✔️ First run complete! Server transitioned successfully.")
-print(f"Status response: {complete_resp}")
+print(f"Status response: {complete_resp}\n")
+
+# ─────────────────────────────────────────────────────────────
+# Phase 5: Ongoing Sync and Change Detection (CI/CD Webhook & Regression Testing)
+# ─────────────────────────────────────────────────────────────
+print("[Phase 5] Simulating ongoing git-sync updates and impact analysis (CI/CD)...")
+
+# 1. Trigger Git push sync webhook
+print("  • Simulating repo git-sync push webhook trigger...")
+sync_payload = {
+    "ref": "refs/heads/main",
+    "after": "a1b2c3d4e5f6g7h8i9j0"
+}
+sync_resp = call_api("POST", "/api/git-sync", sync_payload)
+print(f"  ✔️ Webhook sync status: {sync_resp.get('status')}")
+
+# 2. Query changes for specific commit hash
+commit_hash = get_valid_commit_hash(TARGET_REPO_URL) if not _offline_mode else "a1b2c3d"
+print(f"  • Retrieving impacted functions for commit: {commit_hash}...")
+changes_resp = call_api("GET", "/api/changes", params={"commit": commit_hash})
+changes = changes_resp.get("changed_functions", [])
+risk_level = changes_resp.get("risk_level", "low")
+print(f"  ✔️ Commit Risk Level: {risk_level.upper()}")
+print(f"  ✔️ Found {len(changes)} modified function(s) in this commit.")
+
+if not changes and not _offline_mode:
+    print("  💡 (Skipping regression test loop since no functions were modified in the live HEAD commit.)")
+
+# 3. Process changed functions (impact analysis regression testing)
+for change in changes:
+    name = change["name"]
+    file_path = change["file"]
+    ctype = "modified"
+    
+    print(f"    ├─► Impacted Function: {name} | File: {file_path} | Change: {ctype} | Risk: {risk_level.upper()}")
+    
+    # Query updated context
+    print(f"    │   └─► Fetching updated context for: {name}...")
+    context = call_api("GET", f"/api/context/{name}", params={"file": file_path})
+    func_detail = context.get("function", {})
+    
+    # Simulate test regeneration / rerun
+    print("    │   └─► Running updated regression test suite...")
+    time.sleep(1)
+    print("    │   └─► Regression Test Execution: PASS")
+    
+    # Sync status
+    done_payload = {
+        "function_name": name,
+        "file": file_path,
+        "status": "pass"
+    }
+    call_api("POST", "/api/test/done", done_payload)
+    print("    │   └─► /api/test/done synced successfully.")
+
 print("\n==================================================")
 print("🎉 MOCK AGENT SIMULATION RUN FINISHED SUCCESSFULLY")
 print("==================================================")
