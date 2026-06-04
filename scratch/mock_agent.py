@@ -509,8 +509,8 @@ for comm in communities:
 # Sort queue globally by priority_score descending (highest risk/coupling first)
 test_queue.sort(key=lambda x: x.get("priority_score") if x.get("priority_score") is not None else 0, reverse=True)
 
-print(f"✔️ Identified {len(test_queue)} functions lacking tests. Top 5 priority queue:")
-for i, f in enumerate(test_queue[:5]):
+print(f"✔️ Identified {len(test_queue)} functions lacking tests queue:")
+for i, f in enumerate(test_queue):
     score_val = f.get('priority_score')
     score_display = score_val if score_val is not None else 0
     print(f"  {i+1}. {f['name']} (File: {f['file']}, Score: {score_display}, Community: {f['community_name']})")
@@ -519,7 +519,7 @@ print("")
 # ─────────────────────────────────────────────────────────────
 # Phase 3: Retrieve Context and Simulate Test Generation
 # ─────────────────────────────────────────────────────────────
-print("[Phase 3] Starting mock test generation loop (simulating top 2 functions to save time)...")
+print("[Phase 3] Starting mock test generation loop...")
 processed_count = 0
 
 for func in test_queue[:2]:
