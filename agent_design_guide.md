@@ -1,62 +1,165 @@
 # Integration Guide: How External Test Agents Consume GraphRAG
 
-This guide describes the API protocols, data contracts, and status synchronization flows exposed by the GraphRAG Knowledge Base server. It is designed to help external testing agents integrate with and consume this project effectively.
+This guide details the API protocols, integration architecture, and status synchronization flows exposed by the GraphRAG Knowledge Base server. It is designed to assist external autonomous test agents in integrating with and consuming the GraphRAG pipeline from separate codebase projects.
 
 ---
 
-## 🔄 1. Codebase Ingestion & Status Tracking
+## 🏗️ 1. Architecture Overview (Client-Server Separation)
 
-Before generating tests, the agent must trigger the ingestion pipeline and verify that database indexing is complete.
+The GraphRAG Knowledge Base operates on a decoupled client-server model:
+* **GraphRAG Server (Host/Server)**: The server houses the database engines (Neo4j, ChromaDB) and coordinates the AST extraction, LLM semantic enrichment, and community division.
+* **Test Agent (Client)**: The agent runs locally or in CI/CD within the target project codebase. It connects to the server REST API over HTTP, analyzes the codebase blueprint, and designs/saves tests directly inside the local project files.
 
 ```text
-[Step 1] POST /api/repo/init ──────► Triggers async parsing pipeline
-  │
-  ▼ (Loop/Poll)
-[Step 2] GET /api/repo/status ────► Checks progress until status is "complete"
+  ┌──────────────────────────────┐              ┌───────────────────────────────┐
+  │      Target Project          │              │    GraphRAG Server (Remote)   │
+  │     (Separate Workspace)     │              │     (FastAPI, Neo4j, Chroma)  │
+  │                              │              │                               │
+  │ 1. Verify health & path  ────┼─────────────►│ GET /api/health               │
+  │ 2. Ingest codebase (init) ───┼─────────────►│ POST /api/repo/init           │
+  │ 3. Poll pipeline progress ───┼─────────────►│ GET /api/repo/status/{job}    │
+  │ 4. Get blueprint/snapshot ───┼─────────────►│ POST /api/repo/snapshot       │
+  │ 5. Request function context ─┼─────────────►│ GET /api/context/{func_name}  │
+  │ 6. Sync test status (done) ──┼─────────────►│ POST /api/test/done           │
+  └──────────────────────────────┘              └───────────────────────────────┘
 ```
 
-### A. Initiating Ingestion
-Send a `POST` request to `/api/repo/init` to boot Neo4j and ChromaDB, clone the repository (if remote), and trigger the 9-step AST parsing and AI-enrichment pipeline:
-* **Payload**:
-  ```json
+---
+
+## 🔄 2. Connection, Discovery & Ingestion Flow
+
+When the agent starts up inside a codebase, it must verify if the codebase has already been indexed on the server, check for active ingestion runs, or initiate a new build from scratch.
+
+### Step A: Verify Graph Status & Active Ingestion
+Send a `GET` request to `/api/health` to inspect the server's current operational state:
+```http
+GET /api/health
+```
+
+#### Response Structure:
+```json
+{
+  "status": "ok",
+  "mode": "IDLE",
+  "total_functions": 0,
+  "queued_commits": 0,
+  "last_sync": null,
+  "current_job": null,
+  "codebase_path": null
+}
+```
+
+#### State Evaluation Matrix:
+| Server Mode | `codebase_path` Matching Target? | Action Required |
+| :--- | :--- | :--- |
+| **`IDLE`** | *Any / None* | **Clean Slate**: No graph is built on the server yet. Initiate ingestion (Step B). |
+| **`FIRST_RUN`** | **No** (Path mismatch) | **New Target**: Trigger ingestion for the target project (Step B). |
+| **`FIRST_RUN`** | **Yes** | **Ingestion Running/Unfinished**: Check `current_job`. If a job is active, attach to it and poll status (Step C). |
+| **`ONGOING`** | **No** (Path mismatch) | **New Target**: Trigger ingestion for the target project (Step B). |
+| **`ONGOING`** | **Yes** | **Complete**: The graph is fully built. Skip ingestion and proceed to test backlog (Step D). |
+
+---
+
+### Step B: Initiating Ingestion (If No Graph Exists Yet)
+If no graph is built on the server for the target repository, send a `POST` request to `/api/repo/init` pointing to the absolute path of the local codebase:
+* **Request**:
+  ```http
+  POST /api/repo/init
+  Content-Type: application/json
+  X-API-Key: <your_key>
+  
   {
-    "repo_url": "/path/to/local/codebase",
+    "repo_url": "/absolute/path/to/client/codebase",
     "language": "python"
   }
   ```
-* **Response**: Returns a `job_id` to poll.
-
-### B. Tracking Progress
-Poll `GET /api/repo/status/{job_id}` to ensure the databases are fully synchronized before requesting context.
-* **Key fields to monitor**:
-  * `status`: Wait for `"success"` or `"complete"`.
-  * `progress`: Integer representing progress percentage (`0` to `100`).
-  * `step`: Tracks the current step of ingestion (e.g., `"8/9"`).
+* **Response**:
+  ```json
+  {
+    "job_id": "job-a1b2c3d4",
+    "status": "queued"
+  }
+  ```
 
 ---
 
-## 📊 2. Codebase Discovery & Test Prioritization
+### Step C: Tracking Ingestion Progress
+If an ingestion job was triggered or was already running, poll `GET /api/repo/status/{job_id}`:
+* **Request**:
+  ```http
+  GET /api/repo/status/job-a1b2c3d4
+  ```
+* **Response**:
+  ```json
+  {
+    "job_id": "job-a1b2c3d4",
+    "step": "6/9",
+    "progress": 66,
+    "status": "running",
+    "message": "Extracting semantic entities (LLM)..."
+  }
+  ```
+* **Status Completion**: Poll until `status` is `"success"`, `"done"`, or `"complete"`. If status is `"failed"`, halt execution and inspect server logs.
 
-To map out a test-generation roadmap, the agent queries the codebase snapshot.
+> [!TIP]
+> **Poller Performance**: To minimize CLI visual spam, agents should track the status string in memory and print update lines to stdout using `\r` (carriage returns) only when the step, progress, or message changes.
 
-### Ingesting the Blueprint
-Call `POST /api/repo/snapshot` to retrieve all parsed functions grouped by their semantic module (Community).
+---
 
-### How to use the Snapshot Payload:
-* **Skip Completed Tests**: Filter the list to identify functions where `has_test == false`.
-* **Prioritize High-Risk Code**: Use the `priority_score` attribute (provided for every function node) to sort your testing queue. This score is dynamically computed based on:
-  $$\text{Priority Score} = (\text{Complexity} \times 0.3) + (\text{In-Degree Callers} \times 0.4) + (\text{Commit Churn} \times 0.3)$$
-  Targeting functions with higher priority scores ensures that highly-coupled, complex, and active functions are tested first.
+### Step D: Fetching Snapshot & Analyzing Existing Test Coverage
+Once the codebase is indexed, retrieve the snapshot to review the codebase architecture and check for existing test coverage:
+* **Request**:
+  ```http
+  POST /api/repo/snapshot
+  ```
+* **Response**:
+  ```json
+  {
+    "total": 3,
+    "communities": [
+      {
+        "id": 4,
+        "name": "Billing & Invoicing Services",
+        "functions": [
+          {
+            "name": "process_payment",
+            "file": "services/payment.py",
+            "has_test": false,
+            "priority_score": 8.5
+          },
+          {
+            "name": "get_user",
+            "file": "db/users.py",
+            "has_test": true,
+            "priority_score": 4.1
+          }
+        ]
+      }
+    ]
+  }
+  ```
+
+#### How the Agent Builds the Test Backlog:
+1. **Calculate Coverage Baseline**: Count functions where `has_test == true` divided by total functions to compute existing graph-indexed test coverage.
+2. **Filter Out Existing Tests**: Exclude any functions where `has_test == true` to avoid duplicating existing test suites.
+3. **Sort by Priority**: Sort remaining functions (`has_test == false`) by `priority_score` descending.
+
+The priority score weights coupling, activity, and complexity:
+$$\text{Priority Score} = (\text{Complexity} \times 0.3) + (\text{In-Degree Callers} \times 0.4) + (\text{Commit Churn} \times 0.3)$$
 
 ---
 
 ## 🔌 3. Consuming Context for Test Generation
 
-For each function in the queue, call `GET /api/context/{function_name}` to fetch the context needed for test generation. If your server is configured with namespace collision support, always pass the query parameter `?file={file_path}` to isolate the exact function.
+For each target function in the backlog queue, retrieve the full semantic context required to design high-quality mocks and assert edge cases.
 
-### A. The Context JSON Payload Schema (Current Release)
-Below is the exact JSON structure returned by the server at runtime for `/api/context/{function_name}`.
+### Requesting Context
+```http
+GET /api/context/{function_name}?file={file_path}
+```
+*Always pass the `file` query parameter to avoid namespace collisions.*
 
+### Response Schema:
 ```json
 {
   "function": {
@@ -103,78 +206,47 @@ Below is the exact JSON structure returned by the server at runtime for `/api/co
 }
 ```
 
-> [!NOTE]
-> **Proposed Schema Additions:** The `class_context` block (which contains constructor signatures and codes for object methods) is currently part of the **API Gap Fix Plan** and is not present in the default response payload.
-
----
-
-### B. Detailed Field Mappings & Implementation Guidelines
-
-#### 1. Code Target & Class Instantiation (`raw_code` & `class_name`)
-* **Target Code**: The `function.raw_code` contains the exact source string of the function under test.
-* **Instantiating the Class Instance**: 
-  * If `function.class_name` is populated, the target function is a method on an object.
-  * In the current release, constructor signatures (e.g. `__init__`) must be resolved by the agent querying the constructor code directly or matching files. Once the **Gap 2 API Fix** is deployed, constructor parameters will be served inside a root `class_context` object.
-  * Once resolved, generate a class instantiation block (e.g. `service = PaymentService(mock_db)`) prior to calling the target method (`service.process_payment(...)`).
-
-#### 2. Designing Mock Patches (`calls_outside` & `test_recommendations`)
-* **Automatic Mock Discovery**: Combine the explicit call dependencies in `calls_outside` with `test_recommendations`.
-* **Identifying Mock Targets**: 
-  * Parse items in `calls_outside` where the `file` is `"external"` or a different internal path. These represent external integrations (e.g. Stripe, AWS S3) or separate services.
-  * Check the `test_recommendations` list where `"type": "mock"`. This tells the agent exactly what path to mock (e.g., `stripe.Charge.create`) and the technical rationale (e.g., `"Prevent remote Stripe call"`).
-* **Mock Context Application**: Use the mock targets to generate patch decorators (like `@patch('stripe.Charge.create')` in Python or `jest.mock(...)` in JavaScript) to ensure unit tests run in isolation without network hits.
-
-#### 3. Happy and Exception Flow Assertions (`input_spec`, `output_spec`, & `raises`)
-* **Happy Path**: Use the `inputs` signature and the `input_spec` ranges to feed valid, representative inputs to the function. Assert that the returned value matches the expectations detailed in `output_spec`.
-* **Exception Testing**: Inspect the `raises` list (e.g. `["ValueError", "InsufficentFundsError"]`). Generate test cases designed to trigger these specific errors and assert that the expected exception is raised.
-
-#### 4. Boundary Analysis (`edge_cases` & `test_recommendations`)
-* **Scenarios to Cover**: The `edge_cases` array holds pre-analyzed high-risk states. The agent should write a dedicated test function for each element in this array.
-* **Pre-structured Test Recommendations**: Inspect the `test_recommendations` array where `"type": "test_case"`. The agent can copy the `name` (e.g. `test_negative_amount`), classification `path` (e.g. `error` or `edge`), and standard behavior `description` directly into the test suite.
-
-#### 5. Integration Verification (`called_by` & `community`)
-* **Usage Inspiration**: The `called_by` list identifies real-world callers of the target function. The agent can use this to understand what parameters are normally passed and what return structures callers expect.
-* **Architectural Context**: Use the `community.summary` to populate the agent's LLM system prompt. For instance, knowing that the class belongs to "Billing & Invoicing Services" helps the LLM generate realistic mock objects (e.g., invoices, transaction IDs) rather than generic strings.
-
-
 ---
 
 ## 💾 4. Synchronizing Test Coverage States
 
-To keep the GraphRAG database in sync with your test suite, report results back to the server:
+To maintain database alignment as the agent creates tests in the local project workspace, synchronize progress back to the server.
 
-### A. Updating Coverage Status
-Once the agent successfully writes and compiles a passing unit test for a function, send a `POST` request to `/api/test/done`.
-* **Payload**:
-  ```json
-  {
-    "function_name": "process_payment",
-    "file": "services/payment.py",
-    "status": "pass"
-  }
-  ```
-This flags `has_test = true` on the Function node in Neo4j. In subsequent snapshot calls, this function will be excluded or marked as covered.
+### A. Marking a Function as Tested
+On writing and successfully verifying a test in the local suite, flag the function as covered:
+```http
+POST /api/test/done
+Content-Type: application/json
 
-### B. Closing the Session
-When the initial codebase coverage run is finished, trigger `POST /api/first_run/complete`.
-* **Payload**:
-  ```json
-  {
-    "generated_count": 14
-  }
-  ```
-This transitions the GraphRAG database from `FIRST_RUN` mode to `ONGOING` mode, enabling automatic incremental syncs on new commits.
+{
+  "function_name": "process_payment",
+  "file": "services/payment.py",
+  "status": "pass"
+}
+```
+*This updates the Neo4j graph, setting `has_test = true` on the target function node.*
+
+### B. Finalizing the Run
+After finishing the initial backlog iteration, transition the server mode:
+```http
+POST /api/first_run/complete
+Content-Type: application/json
+
+{
+  "generated_count": 12
+}
+```
+*This transitions the server from `FIRST_RUN` → `ONGOING`, activating real-time change synchronization hooks.*
 
 ---
 
-## 🚀 5. Ongoing Ingestion & Change Detection (CI/CD)
+## 🚀 5. CI/CD Incremental Verification
 
-For ongoing test runs (e.g., triggered by PR checks or CI/CD pipelines), use the change detection endpoints.
+For ongoing commits in `ONGOING` mode, the agent executes regression testing loops.
 
-### A. Automated Updates
-Configure a webhook in your repository provider (GitHub/GitLab) pointing to `/api/git-sync`. Upon every push event, this endpoint automatically pulls the latest commits and updates AST structures in the background.
-
-### B. Targeting Changed Code
-To run regression testing, call `GET /api/changes?commit={git_commit_hash}`.
-* **Returned Data**: A list of changed functions, their modified file paths, and their calculated `risk_level` (low, medium, high).
-* **Usage**: Iterate only over the list of changed functions to update or write tests, keeping your PR verification run fast and targeted.
+1. **Git Update Sync**: The repository webhook triggers `/api/git-sync`, updating the server's graph index in the background.
+2. **Query Changes**: The agent requests changes for the current HEAD commit:
+   ```http
+   GET /api/changes?commit={git_commit_hash}
+   ```
+3. **Targeted Runs**: The agent retrieves context only for the returned list of `changed_functions` and writes/runs tests, ensuring rapid CI/CD execution times.
