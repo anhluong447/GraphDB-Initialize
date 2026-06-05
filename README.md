@@ -10,7 +10,7 @@ An autonomous, zero-configuration Knowledge Graph builder and semantic search en
    All database files, vector spaces, and sync status files are stored directly inside the target codebase's local hidden folder (`.graphrag_data/`). No centralized databases to manage or conflict.
    
 2. **Rich AST Call-Graph Parser**:
-   Uses **Tree-Sitter** to parse Python, JavaScript, TypeScript, JSX, and TSX files. It extracts class/function syntax structures, docstrings, complexity, inputs, outputs, decorators, and builds exact function call relationships.
+   Uses **Tree-Sitter** to parse Python, PHP, JavaScript, TypeScript, JSX, and TSX files. It extracts class/function syntax structures, docstrings, complexity, inputs, outputs, decorators, and builds exact function call relationships.
 
 3. **ChromaDB Storage & Dimension Optimization**:
    Omit raw codebase source code strings from ChromaDB entirely to prevent database bloating. Uses an optimized 512-dimension vector embedding configuration. Search result descriptions are dynamically reconstructed on the fly using a single batched database lookup to Neo4j.
@@ -30,17 +30,51 @@ An autonomous, zero-configuration Knowledge Graph builder and semantic search en
 8. **Robust Startup Handshake**:
    Uses connection polling (`_wait_for_neo4j()`) instead of static timeouts, ensuring that dockerized databases are fully initialized and Bolt handshake is ready before building indexes.
 
+9. **Direct Python Module Interface**:
+   Exposes a clean, state-free, programmatic Python API (`knowledge_base.py`) for autonomous agents to plan, query, and synchronize test generation tasks in-process.
+
 ---
 
 ## 🛠️ Tech Stack
 
 * **Core**: Python 3.10+
-* **Parsing**: Tree-Sitter (Python, TS, JS)
+* **Parsing**: Tree-Sitter (Python, PHP, TS, JS)
 * **Graph DB**: Neo4j (Bolt protocol)
 * **Vector DB**: ChromaDB
 * **LLM / Embeddings**: DeepSeek V4-Flash & OpenAI Embeddings via OpenRouter
-* **Backend API**: FastAPI (Uvicorn)
-* **Frontend Dashboard**: React (`react-force-graph-2d` & D3)
+* **Visualization Backend**: FastAPI (Uvicorn)
+* **Visualization Frontend**: React (`react-force-graph-2d` & D3)
+
+---
+
+## 📂 Project Structure
+
+```text
+D:\GraphRAG/
+├── config.py                 # System configuration and environment loader
+├── docker-compose.yml        # Multi-container orchestration (Neo4j, ChromaDB)
+├── start_all.bat             # 1-Click launcher script for Windows developers
+├── .env                      # Local environment configurations (ignored in git)
+├── initialize_graph.py       # Main entry point for full init / incremental sync
+├── knowledge_base.py         # Python module interface for autonomous agents
+├── parsers/                  # Code and Git history parsers (upgraded rich AST)
+├── extractors/               # Entity extractors and AI Testing Enricher
+├── community/                # Graph clustering and community summarization
+├── query/                    # Hybrid search and context synthesis engine
+├── updater/                  # Filesystem Watcher and Git Hooks
+├── visualization/            # FastAPI Backend & React Frontend Dashboard (Visualizer)
+├── mcp/                      # Model Context Protocol TS/JS server
+├── docs/                     # Documentation and integration guides
+│   ├── USAGE.md              # Quick usage guide for knowledge_base.py
+│   ├── INTEGRATION_GUIDE.md  # Detailed Vietnamese integration guide
+│   ├── architecture.md       # High-level architecture documentation
+│   ├── agent_design_guide.md # Integration guide for test generation agents
+│   ├── api_sufficiency.md   # Evaluation of Python API sufficiency for agents
+│   ├── graphrag-level3.md    # Deployment guide for all building phases
+│   └── updates/              # Archive of historical update plans (0.1, 0.3, 0.4, 0.5)
+├── _archive/                 # Archived components (like legacy REST API server)
+└── scratch/                  # Test scripts and development playground
+```
 
 ---
 
@@ -65,145 +99,31 @@ python initialize_graph.py
 
 ---
 
-## 💻 CLI Commands
+## 🔌 Programmatic Python Integration API (`knowledge_base.py`)
 
-Run `initialize_graph.py` with these helpful flags:
-
-* **Inspect Graph Status**:
-  Prints statistics of the indexed codebase (number of files, functions, AI enrichment coverage, modules, and commits) without performing any sync or LLM operations.
-  ```bash
-  python initialize_graph.py --status
-  ```
-  
-* **Force Full Reinitialization**:
-  Wipes clean all data inside `.graphrag_data/` (Neo4j and ChromaDB) and restarts the ingestion process from scratch.
-  ```bash
-  python initialize_graph.py --force-init
-  ```
-
-* **Incremental Sync**:
-  Running without arguments parses only new, deleted, or modified files since the last run. Saves time and LLM token costs!
-  ```bash
-  python initialize_graph.py
-  ```
-
----
-
-## 📊 Verification Queries (Neo4j Cypher)
-
-Open the Neo4j Browser at `http://localhost:7474` (credentials: `neo4j` / `graphrag123`) and run these queries to verify your graph structure:
-
-* **Find External Dependencies Called by Functions**:
-  ```cypher
-  MATCH (f:Function)-[:USES_EXTERNAL]->(m:Module {is_external: true})
-  RETURN f.name, f.file, m.name LIMIT 10
-  ```
-
-* **Inspect Commits Modifying Specific Functions**:
-  ```cypher
-  MATCH (c:Commit)-[:CHANGED]->(fn:Function)
-  RETURN c.hash, c.author, fn.name, fn.file LIMIT 10
-  ```
-
-* **View AI-Enriched Test Recommendations**:
-  ```cypher
-  MATCH (f:Function) WHERE f.test_recommendations IS NOT NULL
-  RETURN f.name, f.test_recommendations LIMIT 5
-  ```
-
----
-
-## 🔌 Local Python Integration API
-
-You can import the query engine directly into your local scripts/test agents to retrieve contextual codebase answers or structured test specs:
+You can import the module directly into your local scripts/test agents to query the codebase knowledge base:
 
 ```python
-import sys
-import os
+from knowledge_base import get_snapshot, get_function_context, mark_tested
 
-# Add GraphRAG to path
-sys.path.append(os.path.abspath("path/to/GraphRAG"))
+# 1. Get snapshot of prioritized functions needing tests
+snapshot = get_snapshot()
+for comm in snapshot['communities']:
+    print(f"Community: {comm['name']}")
+    for func in comm['functions']:
+        print(f"  - {func['name']} (Priority: {func['priority_score']})")
 
-from query.engine import query_codebase
+# 2. Retrieve context (source code, calling graph, test specs) for a function
+ctx = get_function_context("process_payment")
+print(ctx["function"]["raw_code"])
+print(ctx["function"]["edge_cases"])
 
-# Retrieve synthesized answers with source nodes and relations
-response = query_codebase("How does the authenticating flow work?")
-print(response["answer"])
+# 3. Mark function as verified
+mark_tested("process_payment")
 ```
 
----
-
-## 🖥️ Server Mode (Knowledge Base API Server) 🌐
-
-GraphRAG can run as a standalone API server to decouple the database from client codebases. This exposes REST endpoints designed for autonomous testing agents (Mô hình A).
-
-### 1. Setup Server Mode
-In your `.env` file, configure the server options:
-```env
-# Enable server mode (centralizes storage inside ./server_data/)
-SERVER_MODE=true
-
-# Secure your endpoints with an API key (requests must pass X-API-Key header)
-API_KEY=your-secret-api-key-here
-
-# Directory on the server where repositories will be cloned
-WORKSPACE_DIR=./workspace
-
-# Optional: Webhook URL of the Auto-Test Agent to notify on pipeline changes
-WEBHOOK_URL=
-```
-
-### 2. Start the Server
-Start the Uvicorn-based FastAPI server (which automatically boots Neo4j and ChromaDB):
-```bash
-# On Windows, double-click:
-.\start_server.bat
-
-# Or run via Python:
-python start_server.py --port 8080
-```
-API Documentation will be accessible at: `http://localhost:8080/docs`
-
-### 3. API Endpoints Reference (DA01 Spec)
-
-| Mode | Endpoint | Method | Description |
-|---|---|---|---|
-| **FIRST_RUN** | `/api/repo/init` | `POST` | Initialize codebase from local path or remote Git URL. Runs async pipeline. |
-| **FIRST_RUN** | `/api/repo/status/{job_id}` | `GET` | Get status and progress percentage of initialization pipeline. |
-| **FIRST_RUN** | `/api/repo/snapshot` | `POST` | Return all parsed functions grouped by community with computed `priority_score`. |
-| **FIRST_RUN** | `/api/first_run/complete` | `POST` | Mark test generation finished, switch server to `ONGOING` mode, flush commit queue. |
-| **ONGOING** | `/api/changes` | `GET` | Get list of functions changed by a specific commit hash and its risk level. |
-| **BOTH** | `/api/context/{name}` | `GET` | Retrieve full subgraph context, docstrings, source code, and AI test specs. |
-| **BOTH** | `/api/functions` | `GET` | List all indexed functions with optional filters. |
-| **BOTH** | `/api/test/done` | `POST` | Mark a function as tested (`has_test = true` flag updated in Neo4j). |
-| **BOTH** | `/api/git-sync` | `POST` | Webhook triggered on Git Push events. Executes background incremental sync. |
-| **BOTH** | `/api/health` | `GET` | Verify server status, DB connections, and current operating mode. |
-
-### 4. Client Integration Examples
-
-#### Initialize Codebase
-```bash
-curl -X POST http://localhost:8080/api/repo/init \
-  -H "X-API-Key: your-secret-api-key-here" \
-  -H "Content-Type: application/json" \
-  -d '{"repo_url": "https://github.com/example/demo-project.git", "language": "python"}'
-```
-
-#### Poll Status
-```bash
-curl http://localhost:8080/api/repo/status/job-123456 \
-  -H "X-API-Key: your-secret-api-key-here"
-```
-
-#### Get Snapshot
-```bash
-curl -X POST http://localhost:8080/api/repo/snapshot \
-  -H "X-API-Key: your-secret-api-key-here"
-```
-
-#### Get Function Context
-```bash
-curl http://localhost:8080/api/context/process_payment \
-  -H "X-API-Key: your-secret-api-key-here"
-```
-
+For more details on integration, please refer to:
+* 📖 [Quick Usage Guide](file:///D:/GraphRAG/docs/USAGE.md)
+* 📖 [Vietnamese Integration Guide](file:///D:/GraphRAG/docs/INTEGRATION_GUIDE.md)
+* 📖 [Agent Integration Guide](file:///D:/GraphRAG/docs/agent_design_guide.md)
+* 📖 [Architecture Reference](file:///D:/GraphRAG/docs/architecture.md)

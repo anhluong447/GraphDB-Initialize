@@ -89,7 +89,7 @@ Sau lần chạy đầu tiên, bạn **không cần gõ lệnh dài dòng và kh
 
 ## 4. Cách Gọi Local Python API (Không cần bật FastAPI Server)
 
-Dự án kiểm thử tự động của bạn có thể sử dụng GraphRAG trực tiếp như một thư viện Python cục bộ để tìm kiếm thông tin ngữ cảnh hoặc đọc các tài liệu kiểm thử của hàm (`edge_cases`, `test_recommendations`).
+Dự án kiểm thử tự động của bạn có thể sử dụng GraphRAG trực tiếp như một thư viện Python cục bộ bằng cách import module `knowledge_base`.
 
 ### Ví dụ code Python trong dự án chính:
 
@@ -101,45 +101,49 @@ import os
 GRAPHRAG_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "graphrag"))
 sys.path.insert(0, GRAPHRAG_DIR)
 
-# 2. Import các API truy vấn cục bộ
-from query.engine import query, get_node_detail
+# 2. Import các API truy vấn trực tiếp từ knowledge_base
+from knowledge_base import get_snapshot, get_function_context, get_changes, mark_tested
 
 # ─────────────────────────────────────────────────────────────
-# Kịch bản 1: Tìm kiếm ngữ cảnh nâng cao (Hybrid Query)
+# Kịch bản 1: Lấy snapshot toàn bộ codebase (Lần đầu chạy - First Run)
 # ─────────────────────────────────────────────────────────────
-question = "Hàm login_user hoạt động thế nào và có các lỗi tiềm ẩn nào?"
-result = query(question)
-
-print("--- KẾT QUẢ TRUY VẤN NGỮ CẢNH ---")
-print(result["summary"])  # Trả về tóm tắt phân cụm, quan hệ hàm, và các điểm quan trọng
+snapshot = get_snapshot()
+print(f"Tổng số hàm cần test: {snapshot['total']}")
+for comm in snapshot['communities']:
+    print(f"Community: {comm['name']} (ID: {comm['id']})")
+    for func in comm['functions']:
+        print(f"  - {func['name']} (File: {func['file']}, Complexity: {func['complexity']})")
 
 # ─────────────────────────────────────────────────────────────
-# Kịch bản 2: Lấy thẳng tài liệu kiểm thử của một hàm cụ thể để tự động sinh test case
+# Kịch bản 2: Lấy thông tin ngữ cảnh để tự động sinh test case
 # ─────────────────────────────────────────────────────────────
 function_name = "login_user"
-detail = get_node_detail(function_name)
+ctx = get_function_context(function_name)
 
-if detail and "node" in detail:
-    node_data = detail["node"]
+if ctx and "function" in ctx:
+    func_data = ctx["function"]
     
     print(f"\nTài liệu kiểm thử chi tiết cho hàm: {function_name}")
     print("--------------------------------------------------")
     print("1. Cách thức hoạt động:")
-    print(node_data.get("how_it_works"))
+    print(func_data.get("how_it_works"))
     
     print("\n2. Ràng buộc Inputs:")
-    print(node_data.get("input_spec"))
+    print(func_data.get("input_spec"))
     
     print("\n3. Các Edge Cases cần lưu ý:")
     import json
-    edge_cases = json.loads(node_data.get("edge_cases", "[]"))
+    edge_cases = json.loads(func_data.get("edge_cases", "[]"))
     for ec in edge_cases:
         print(f"  - {ec}")
         
     print("\n4. Gợi ý viết test case & Mocking:")
-    recommendations = json.loads(node_data.get("test_recommendations", "[]"))
+    recommendations = json.loads(func_data.get("test_recommendations", "[]"))
     for rec in recommendations:
         print(f"  - {rec}")
+        
+    # Đánh dấu đã kiểm thử xong
+    mark_tested(function_name)
 else:
     print(f"Không tìm thấy thông tin hàm {function_name} trong đồ thị.")
 ```

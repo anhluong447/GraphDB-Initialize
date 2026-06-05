@@ -1,0 +1,228 @@
+
+================================================================================
+  DA01 — KNOWLEDGE BASE WORKFLOW DESIGN
+================================================================================
+
+================================================================================
+  TỔNG QUAN 2 TRẠNG THÁI
+================================================================================
+
+                         ┌─────────────┐
+                    ───► │  FIRST_RUN  │
+                         └──────┬──────┘
+                                │
+                    gen test xong toàn bộ
+                    POST /api/first_run/complete
+                                │
+                                ▼
+                         ┌─────────────┐
+                         │   ONGOING   │ ◄─── chạy mãi mãi
+                         └─────────────┘
+
+
+================================================================================
+  WORKFLOW 1 — FIRST RUN
+  (chạy 1 lần duy nhất khi khởi tạo repo)
+================================================================================
+
+  [Team Auto-Test Agent]          [Knowledge Base Server]
+         │                                  │
+         │  POST /api/repo/init             │
+         │  { repo_url, language }          │
+         │ ───────────────────────────────► │
+         │                                  │  clone repo
+         │  { job_id, status: "queued" }    │  chạy pipeline 9 bước
+         │ ◄─────────────────────────────── │  (async, không block)
+         │                                  │
+         │  GET /api/repo/status/{job_id}   │
+         │ ───────────────────────────────► │
+         │  { step: "6/9", progress: 66% }  │
+         │ ◄─────────────────────────────── │
+         │       (poll cho đến khi xong)    │
+         │                                  │  pipeline xong
+         │  Webhook: "pipeline ready"       │  set mode = FIRST_RUN
+         │ ◄─────────────────────────────── │
+         │                                  │
+         │  POST /api/repo/snapshot         │
+         │ ───────────────────────────────► │
+         │                                  │
+         │  {                               │
+         │    total: 342,                   │
+         │    communities: [                │
+         │      {                           │
+         │        name: "Payment",          │
+         │        functions: [              │
+         │          {                       │
+         │            name: "process_payment│
+         │            priority_score: 95,   │
+         │            has_test: false       │
+         │          }, ...                  │
+         │        ]                         │
+         │      }, ...                      │
+         │    ]                             │
+         │  }                               │
+         │ ◄─────────────────────────────── │
+         │                                  │
+         │  (sort theo priority_score)      │
+         │                                  │
+         │  loop: với mỗi function          │
+         │  ┌───────────────────────────┐   │
+         │  │ GET /api/context/{name}   │   │
+         │  │──────────────────────────►│   │
+         │  │ { function,               │   │
+         │  │   community,              │   │
+         │  │   calls_outside,          │   │
+         │  │   called_by,              │   │
+         │  │   test_recommendations }  │   │
+         │  │◄──────────────────────────│   │
+         │  │                           │   │
+         │  │  AI gen test code         │   │
+         │  └───────────────────────────┘   │
+         │         (342 lần)                │
+         │                                  │
+         │  POST /api/first_run/complete    │
+         │  { generated_count: 342 }        │
+         │ ───────────────────────────────► │  set mode = ONGOING
+         │                                  │  flush commit queue
+         │                                  │  (xem ghi chú bên dưới)
+         │                                  │
+
+
+  ⚠️  GHI CHÚ — COMMIT QUEUE:
+  ─────────────────────────────────────────────────────────────────────────────
+  Nếu developer push code TRONG LÚC first run đang chạy:
+
+    Developer push code
+          │
+          ▼
+    Git hook chạy bình thường → graph được update
+          │
+          ▼
+    Commit được ĐƯA VÀO QUEUE, chưa gửi webhook
+          │
+          ▼
+    Khi nhận POST /api/first_run/complete
+          │
+          ▼
+    Flush queue → gửi webhook cho từng commit theo thứ tự thời gian
+  ─────────────────────────────────────────────────────────────────────────────
+
+
+================================================================================
+  WORKFLOW 2 — TRANSITION (First Run → Ongoing)
+================================================================================
+
+  [Team Auto-Test Agent]          [Knowledge Base Server]
+         │                                  │
+         │  POST /api/first_run/complete    │
+         │  { generated_count: 342 }        │
+         │ ───────────────────────────────► │
+         │                                  │  kiểm tra: 342 == total_functions?
+         │                                  │
+         │                           YES ───┤  set mode = ONGOING
+         │                                  │  lấy danh sách queued commits
+         │                                  │
+         │  Webhook cho commit 1            │
+         │ ◄─────────────────────────────── │
+         │  Webhook cho commit 2            │
+         │ ◄─────────────────────────────── │
+         │        ...                       │
+         │                                  │
+
+  ⚠️  EDGE CASE — GEN FAIL MỘT SỐ FUNCTION:
+  ─────────────────────────────────────────────────────────────────────────────
+  generated_count < total_functions?
+
+  → Vẫn chuyển sang ONGOING
+  → Các function chưa gen được đánh dấu has_test = false
+  → Khi commit tiếp theo touch function đó → gen lại
+  ─────────────────────────────────────────────────────────────────────────────
+
+
+================================================================================
+  WORKFLOW 3 — ONGOING
+  (chạy mỗi khi có commit mới, mãi mãi)
+================================================================================
+
+  [Developer]   [GitHub]   [KB Server]       [Team Auto-Test Agent]
+       │             │          │                       │
+  push code          │          │                       │
+       │─────────────►          │                       │
+       │             │          │                       │
+       │         webhook        │                       │
+       │         ───────────────►                       │
+       │                        │  re-parse files       │
+       │                        │  update graph         │
+       │                        │  (positions, imports) │
+       │                        │                       │
+       │                        │  POST webhook         │
+       │                        │  {                    │
+       │                        │   commit: "abc123",   │
+       │                        │   changed_functions:  │
+       │                        │     ["process_pay.."] │
+       │                        │   risk_level: "high"  │
+       │                        │  }                    │
+       │                        │ ──────────────────────►
+       │                        │                       │
+       │                        │              Planning Agent
+       │                        │          GET /api/changes?commit=abc123
+       │                        │ ◄──────────────────────
+       │                        │  {                    │
+       │                        │   changed_functions,  │
+       │                        │   affected_services,  │
+       │                        │   risk_level          │
+       │                        │  }                    │
+       │                        │ ──────────────────────►
+       │                        │                       │
+       │                        │            Test Generation Agent
+       │                        │       GET /api/context/process_payment
+       │                        │ ◄──────────────────────
+       │                        │  {                    │
+       │                        │   function: {...},    │
+       │                        │   community: {...},   │
+       │                        │   calls_outside: [...}│
+       │                        │   called_by: [...],   │
+       │                        │   test_recs: [...]    │
+       │                        │  }                    │
+       │                        │ ──────────────────────►
+       │                        │                       │  AI gen test
+       │                        │                       │  execute test
+       │                        │                       │
+       │                        │       (nếu pass)      │
+       │                        │  POST /api/test/done  │
+       │                        │  { function, status } │
+       │                        │ ◄──────────────────────
+       │                        │  set has_test = true  │
+       │                        │                       │
+
+
+================================================================================
+  API REFERENCE
+================================================================================
+
+  MODE        METHOD   ENDPOINT                        MÔ TẢ
+  ─────────── ──────── ─────────────────────────────── ──────────────────────────
+  FIRST_RUN   POST     /api/repo/init                  Khởi tạo pipeline, async
+  FIRST_RUN   GET      /api/repo/status/{job_id}       Kiểm tra tiến độ pipeline
+  FIRST_RUN   POST     /api/repo/snapshot              Lấy toàn bộ codebase
+  FIRST_RUN   POST     /api/first_run/complete         Báo xong, chuyển ONGOING
+  ─────────── ──────── ─────────────────────────────── ──────────────────────────
+  ONGOING     GET      /api/changes?commit={hash}      Functions thay đổi
+  ─────────── ──────── ─────────────────────────────── ──────────────────────────
+  BOTH        GET      /api/context/{name}             Full subgraph 1 function
+  BOTH        GET      /api/functions                  List tất cả functions
+  BOTH        GET      /api/health                     Trạng thái server + mode
+  BOTH        POST     /api/test/done                  Cập nhật has_test = true
+  ─────────── ──────── ─────────────────────────────── ──────────────────────────
+
+
+================================================================================
+  SERVER INFO
+================================================================================
+
+  KB Server  :  ___________:8080
+  Neo4j UI   :  ___________:7474
+  Người phụ
+  trách      :  ___________
+
+================================================================================
