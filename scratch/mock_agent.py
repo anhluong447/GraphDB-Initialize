@@ -483,7 +483,7 @@ print("")
 print("[Phase 3] Starting mock test generation loop...")
 processed_count = 0
 
-for func in test_queue[:2]:
+for func in test_queue[-10:-8]:
     name = func["name"]
     file_path = func["file"]
     print(f"--- Processing Function: {name} ({file_path}) ---")
