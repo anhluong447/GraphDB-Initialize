@@ -8,12 +8,7 @@ load_dotenv(os.path.join(config_dir, ".env"))
 
 PROJECT_NAME = os.getenv("PROJECT_NAME", "GraphRAG-Project")
 
-# Server Mode — when True, data is stored locally in ./server_data/ instead of
-# inside the target codebase's .graphrag_data/ folder.
-SERVER_MODE = os.getenv("SERVER_MODE", "false").lower() in ("true", "1", "yes")
-WORKSPACE_DIR = os.path.join(config_dir, os.getenv("WORKSPACE_DIR", "workspace")).replace("\\", "/")
-API_KEY = os.getenv("API_KEY", "")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
+
 
 # Target project to index. By default, it is the parent folder of this tool.
 CODEBASE_PATH = os.getenv("CODEBASE_PATH")
@@ -26,15 +21,10 @@ if not os.path.isabs(CODEBASE_PATH):
 
 CODEBASE_PATH = CODEBASE_PATH.replace("\\", "/")
 
-# GraphRAG data directory
-# Server mode: stored in ./server_data/ next to this config
-# Subsystem mode: stored inside the target codebase's .graphrag_data/
+# GraphRAG data directory — stored inside the target codebase's .graphrag_data/
 GRAPHRAG_DATA_DIR = os.getenv("GRAPHRAG_DATA_DIR")
 if not GRAPHRAG_DATA_DIR:
-    if SERVER_MODE:
-        GRAPHRAG_DATA_DIR = os.path.join(config_dir, "server_data")
-    else:
-        GRAPHRAG_DATA_DIR = os.path.join(CODEBASE_PATH, ".graphrag_data")
+    GRAPHRAG_DATA_DIR = os.path.join(CODEBASE_PATH, ".graphrag_data")
 GRAPHRAG_DATA_DIR = GRAPHRAG_DATA_DIR.replace("\\", "/")
 
 # Supported languages for AST parsing

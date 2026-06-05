@@ -3,6 +3,7 @@ tree-sitter
 tree-sitter-python
 tree-sitter-javascript
 tree-sitter-typescript
+tree-sitter-php
 gitpython
 requests
 python-dotenv
@@ -22,9 +23,10 @@ networkx
 igraph
 leidenalg
 
-# API
+# API (required for visualization dashboard)
 fastapi
 uvicorn
 
 # File Watcher
 watchdog
+

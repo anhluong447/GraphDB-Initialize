@@ -7,6 +7,7 @@ from tree_sitter import Language, Parser
 import tree_sitter_python as tspython
 import tree_sitter_javascript as tsjavascript
 import tree_sitter_typescript as tstypescript
+import tree_sitter_php as tsphp
 from config import CODEBASE_PATH, SUPPORTED_LANGUAGES, IGNORE_DIRS
 
 # Python stdlib module names (used for is_stdlib detection)
@@ -47,15 +48,270 @@ except AttributeError:
 PY_LANGUAGE = Language(tspython.language())
 JS_LANGUAGE = Language(tsjavascript.language())
 TS_LANGUAGE = Language(tstypescript.language_typescript())
+PHP_LANGUAGE = Language(tsphp.language_php())
 
 LANGUAGE_MAP = {
     "python": PY_LANGUAGE,
     "javascript": JS_LANGUAGE,
     "typescript": TS_LANGUAGE,
+    "php": PHP_LANGUAGE,
 }
 
 
-def _parse_php_file_regex(file_path: str, source_bytes: bytes) -> dict:
+# Node types trong PHP AST làm tăng complexity
+_PHP_COMPLEXITY_NODES = {
+    "if_statement",
+    "elseif_clause",
+    "else_clause",
+    "foreach_statement",
+    "for_statement",
+    "while_statement",
+    "do_statement",
+    "switch_statement",
+    "case_statement",
+    "catch_clause",
+    "conditional_expression",   # ternary operator
+    "match_expression",
+    "null_safe_member_access_expression",
+}
+
+def _calc_php_complexity(node) -> int:
+    """
+    Tính cyclomatic complexity của 1 PHP AST node.
+    Đếm số nhánh logic (if, foreach, while, catch...) + 1.
+    """
+    count = 1
+    def traverse(n):
+        if n.type in _PHP_COMPLEXITY_NODES:
+            nonlocal count
+            count += 1
+        for child in n.children:
+            traverse(child)
+    traverse(node)
+    return count
+
+# PHP function/method names bị skip dù có complexity cao
+# (magic methods không cần test, hoặc quá generic)
+_PHP_SKIP_NAMES = {
+    "__construct", "__destruct", "__clone",
+    "__sleep", "__wakeup", "__serialize", "__unserialize",
+    "__invoke", "__debugInfo",
+    # generic getters/setters — thường trivial
+    "getRow", "getRows", "getResult",
+}
+
+
+def _parse_php_file_treesitter(file_path: str, source_bytes: bytes) -> dict:
+    """
+    Parse PHP file using Tree-Sitter for accurate AST.
+    Filters out trivial functions (complexity=1, line_count<4).
+    """
+    try:
+        PHP_LANGUAGE = LANGUAGE_MAP["php"]
+    except KeyError:
+        # Fallback nếu PHP_LANGUAGE chưa được khởi tạo
+        import tree_sitter_php as tsphp
+        PHP_LANGUAGE = Language(tsphp.language_php())
+
+    parser = Parser(PHP_LANGUAGE)
+    tree = parser.parse(source_bytes)
+    code = source_bytes.decode("utf-8", errors="ignore")
+    lines = code.splitlines()
+
+    nodes = []
+    imports = []
+    current_class = None
+
+    # --- FILTER THRESHOLDS ---
+    MIN_LINES = 4         # function phải có ít nhất 4 dòng
+    MIN_COMPLEXITY = 2    # phải có ít nhất 1 nhánh logic (if/foreach/...)
+
+    def get_line(node_obj):
+        return node_obj.start_point[0] + 1  # 1-indexed
+
+    def get_text(node_obj):
+        return node_obj.text.decode("utf-8", errors="ignore").strip()
+
+    def extract_params(params_node):
+        """Extract parameter list từ AST node."""
+        inputs = []
+        if params_node is None:
+            return inputs
+        for child in params_node.children:
+            if child.type in ("simple_parameter", "variadic_parameter",
+                              "property_promotion_parameter"):
+                param_name = ""
+                param_type = ""
+                for sub in child.children:
+                    if sub.type == "variable_name":
+                        param_name = get_text(sub)
+                    elif sub.type in ("named_type", "union_type",
+                                      "nullable_type", "intersection_type"):
+                        param_type = get_text(sub)
+                if param_name:
+                    inputs.append({"name": param_name, "type": param_type})
+        return inputs
+
+    def extract_calls(func_node):
+        """Extract function/method calls bên trong body của function."""
+        calls = set()
+        def walk(n):
+            if n.type in ("function_call_expression", "method_call_expression",
+                          "static_method_call_expression"):
+                for child in n.children:
+                    if child.type == "name":
+                        calls.add(get_text(child))
+            for c in n.children:
+                walk(c)
+        walk(func_node)
+        return list(calls)
+
+    def extract_imports_from_use(node_obj):
+        """Extract use statements (imports)."""
+        for child in node_obj.children:
+            if child.type == "namespace_use_declaration":
+                for clause in child.children:
+                    if clause.type == "namespace_use_clause":
+                        full_path = get_text(clause)
+                        parts = full_path.split("\\")
+                        root_mod = parts[0] if parts else ""
+                        imports.append({
+                            "module": root_mod,
+                            "full_path": full_path,
+                            "alias": "",
+                            "names": [parts[-1]] if parts else [],
+                            "is_external": True,
+                            "is_stdlib": False,
+                            "source_file": file_path,
+                        })
+
+    def process_function(func_node, class_name=None):
+        """Process 1 function/method node, apply filters, add to nodes list."""
+        func_name = ""
+        params_node = None
+        visibility = "public"
+        is_static = False
+        return_type = ""
+
+        for child in func_node.children:
+            if child.type == "name":
+                func_name = get_text(child)
+            elif child.type == "formal_parameters":
+                params_node = child
+            elif child.type in ("public", "protected", "private"):
+                visibility = child.type
+            elif child.type == "static":
+                is_static = True
+            elif child.type == "named_type":
+                return_type = get_text(child)
+
+        if not func_name:
+            return
+
+        # Skip nếu trong danh sách đen
+        if func_name in _PHP_SKIP_NAMES:
+            return
+
+        start_line = get_line(func_node)
+        end_line = func_node.end_point[0] + 1
+        line_count = end_line - start_line + 1
+        complexity = _calc_php_complexity(func_node)
+
+        # FILTER: bỏ qua function quá đơn giản
+        if line_count < MIN_LINES or complexity < MIN_COMPLEXITY:
+            return
+
+        # Build anchor (dòng đầu tiên của function)
+        anchor = lines[start_line - 1].strip() if start_line <= len(lines) else ""
+
+        # Parse inputs
+        inputs = extract_params(params_node)
+
+        # Extract calls
+        calls = extract_calls(func_node)
+
+        nodes.append({
+            "type": "method_definition" if class_name else "function_definition",
+            "name": func_name,
+            "file": file_path,
+            "start_line": start_line,
+            "end_line": end_line,
+            "anchor": anchor,
+            "calls": calls,
+            "parent": class_name,
+            "is_async": False,
+            "visibility": visibility,
+            "class_name": class_name,
+            "docstring": "",
+            "inputs": json.dumps(inputs),
+            "output": return_type,
+            "raises": "[]",
+            "complexity": complexity,
+            "annotations": "[]",
+        })
+
+    def walk_tree(node_obj, class_ctx=None):
+        nonlocal current_class
+
+        if node_obj.type == "class_declaration":
+            # Extract class name
+            cls_name = ""
+            for child in node_obj.children:
+                if child.type == "name":
+                    cls_name = get_text(child)
+                    break
+            if cls_name:
+                # Add class node (không filter class)
+                start_line = get_line(node_obj)
+                end_line = node_obj.end_point[0] + 1
+                anchor = lines[start_line - 1].strip() if start_line <= len(lines) else ""
+                nodes.append({
+                    "type": "class_definition",
+                    "name": cls_name,
+                    "file": file_path,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "anchor": anchor,
+                    "calls": [],
+                    "parent": None,
+                    "is_async": False,
+                    "visibility": "public",
+                    "class_name": None,
+                    "docstring": "",
+                    "inputs": "[]",
+                    "output": "",
+                    "raises": "[]",
+                    "complexity": 1,
+                    "annotations": "[]",
+                })
+                current_class = cls_name
+                for child in node_obj.children:
+                    walk_tree(child, class_ctx=cls_name)
+                current_class = None
+                return
+
+        elif node_obj.type in ("function_definition", "method_declaration"):
+            process_function(node_obj, class_name=class_ctx)
+            return  # Không walk sâu vào bên trong function
+
+        elif node_obj.type == "namespace_use_declaration":
+            extract_imports_from_use(node_obj.parent or node_obj)
+
+        for child in node_obj.children:
+            walk_tree(child, class_ctx=class_ctx)
+
+    walk_tree(tree.root_node)
+
+    return {
+        "file": file_path,
+        "language": "php",
+        "nodes": nodes,
+        "imports": imports,
+        "raw_code": code,
+    }
+
+
+def _parse_php_file_regex_DEPRECATED(file_path: str, source_bytes: bytes) -> dict:
     """
     Fallback regex parser for PHP files.
     Extracts classes, methods, functions, and function calls.
@@ -231,9 +487,9 @@ def parse_file(file_path: str) -> dict:
     except Exception:
         return None
 
-    # Handle PHP via Regex parser fallback
+    # Handle PHP via Tree-Sitter (accurate AST + noise filtering)
     if lang_name == "php":
-        return _parse_php_file_regex(file_path, source_bytes)
+        return _parse_php_file_treesitter(file_path, source_bytes)
 
     parser = Parser(LANGUAGE_MAP[lang_name])
     tree = parser.parse(source_bytes)
