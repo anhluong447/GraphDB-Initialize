@@ -185,11 +185,14 @@ def enrich_all_functions(batch_size: int = 8):
     """
     client = get_client()
 
-    # Only enrich functions that have coordinates and file, and haven't been enriched yet (resumable)
+    import config
+
+    # Only enrich functions that have coordinates and file, have complexity >= ENRICH_MIN_COMPLEXITY, and haven't been enriched yet (resumable)
     result = client.run("""
         MATCH (n:Function)
         WHERE n.file IS NOT NULL AND n.start_line IS NOT NULL
           AND n.how_it_works IS NULL
+          AND (n.complexity >= $min_complexity OR n.complexity IS NULL)
         RETURN n.name as name, n.file as file, n.start_line as start_line,
                n.end_line as end_line, n.anchor as anchor,
                n.visibility as visibility, n.is_async as is_async,
@@ -197,7 +200,7 @@ def enrich_all_functions(batch_size: int = 8):
                n.inputs as inputs, n.output as output,
                n.raises as raises, n.complexity as complexity,
                n.annotations as annotations
-    """)
+    """, {"min_complexity": config.ENRICH_MIN_COMPLEXITY})
 
     functions = []
     for r in result:
