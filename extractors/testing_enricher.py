@@ -17,12 +17,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import openai
 from graph.neo4j_client import get_client
-from config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, LLM_MODEL
 
-client_ai = openai.OpenAI(
-    api_key=OPENROUTER_API_KEY,
-    base_url=OPENROUTER_BASE_URL,
-)
+_client_ai = None
+
+def _get_client_ai():
+    global _client_ai
+    if _client_ai is None:
+        import config
+        _client_ai = openai.OpenAI(
+            api_key=config.OPENROUTER_API_KEY,
+            base_url=config.OPENROUTER_BASE_URL,
+        )
+    return _client_ai
 
 ENRICHMENT_PROMPT = """You are an expert software testing engineer. Analyze the following function and produce a comprehensive testing specification.
 
@@ -90,8 +96,9 @@ def _enrich_single_function(func: dict, retries: int = 4) -> dict | None:
 
     for attempt in range(retries):
         try:
-            response = client_ai.chat.completions.create(
-                model=LLM_MODEL,
+            import config
+            response = _get_client_ai().chat.completions.create(
+                model=config.LLM_MODEL,
                 max_tokens=2000,
                 messages=messages,
                 timeout=30.0,

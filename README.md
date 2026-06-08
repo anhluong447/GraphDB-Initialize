@@ -52,28 +52,27 @@ An autonomous, zero-configuration Knowledge Graph builder and semantic search en
 ```text
 D:\GraphRAG/
 ├── config.py                 # System configuration and environment loader
-├── docker-compose.yml        # Multi-container orchestration (Neo4j, ChromaDB)
+├── docker-compose.yml        # Multi-container orchestration (Neo4j)
 ├── start_all.bat             # 1-Click launcher script for Windows developers
+├── Makefile                  # Shortcut commands for orchestration & execution
 ├── .env                      # Local environment configurations (ignored in git)
-├── initialize_graph.py       # Main entry point for full init / incremental sync
+├── initialize_graph.py       # CLI wrapper for full init / incremental sync
 ├── knowledge_base.py         # Python module interface for autonomous agents
-├── parsers/                  # Code and Git history parsers (upgraded rich AST)
+├── core/                     # Core init & sync pipelines implementation
+├── parsers/                  # Code and Git history parsers (base & php specific)
 ├── extractors/               # Entity extractors and AI Testing Enricher
 ├── community/                # Graph clustering and community summarization
 ├── query/                    # Hybrid search and context synthesis engine
 ├── updater/                  # Filesystem Watcher and Git Hooks
 ├── visualization/            # FastAPI Backend & React Frontend Dashboard (Visualizer)
 ├── mcp/                      # Model Context Protocol TS/JS server
-├── docs/                     # Documentation and integration guides
-│   ├── USAGE.md              # Quick usage guide for knowledge_base.py
-│   ├── INTEGRATION_GUIDE.md  # Detailed Vietnamese integration guide
-│   ├── architecture.md       # High-level architecture documentation
-│   ├── agent_design_guide.md # Integration guide for test generation agents
-│   ├── api_sufficiency.md   # Evaluation of Python API sufficiency for agents
-│   ├── graphrag-level3.md    # Deployment guide for all building phases
-│   └── updates/              # Archive of historical update plans (0.1, 0.3, 0.4, 0.5)
-├── _archive/                 # Archived components (like legacy REST API server)
-└── scratch/                  # Test scripts and development playground
+└── docs/                     # Documentation and integration guides
+    ├── USAGE.md              # Quick usage guide for knowledge_base.py
+    ├── INTEGRATION_GUIDE.md  # Detailed Vietnamese integration guide
+    ├── architecture.md       # High-level architecture documentation
+    ├── agent_design_guide.md # Integration guide for test generation agents
+    ├── api_sufficiency.md   # Evaluation of Python API sufficiency for agents
+    └── graphrag-level3.md    # Deployment guide for all building phases
 ```
 
 ---
@@ -90,8 +89,21 @@ OPENROUTER_API_KEY=sk-or-v1-xxxxxxxx...
 CODEBASE_PATH=../my-target-project
 ```
 
-### 2. Run Initialization
-Run the main script to start databases, update gitignores, and perform full ingestion:
+### 2. Run Ingestion / Synchronization
+
+You can run the main script directly, or use the provided **Makefile** / **Windows Launcher**:
+
+#### Option A: Using Makefile (Cross-Platform)
+```bash
+make up           # Start Neo4j container in background
+make init         # Auto-detect: perform full initialization or incremental sync
+make force-init   # Wipe database and perform full re-ingestion
+make status       # Inspect current database metrics & status
+make down         # Stop Neo4j container
+```
+
+#### Option B: Using Windows Launcher
+Double-click `start_all.bat` (which starts Neo4j database, Backend API, Frontend Explorer, and Watcher) or run:
 ```bash
 python initialize_graph.py
 ```

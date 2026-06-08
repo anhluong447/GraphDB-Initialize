@@ -22,8 +22,3 @@ services:
     tmpfs:
       - /var/lib/neo4j/run
 
-  chromadb:
-    image: chromadb/chroma:latest
-    ports:
-      - "8000:8000"
-

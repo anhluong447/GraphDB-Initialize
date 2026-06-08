@@ -1,12 +1,18 @@
 import json
 import time
 import openai
-from config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, LLM_MODEL
 
-client = openai.OpenAI(
-    api_key=OPENROUTER_API_KEY,
-    base_url=OPENROUTER_BASE_URL,
-)
+_client = None
+
+def _get_client():
+    global _client
+    if _client is None:
+        import config
+        _client = openai.OpenAI(
+            api_key=config.OPENROUTER_API_KEY,
+            base_url=config.OPENROUTER_BASE_URL,
+        )
+    return _client
 
 EXTRACTION_PROMPT = """You are a code knowledge graph builder.
 
@@ -70,8 +76,9 @@ def extract_entities_from_chunk(chunk_text: str, chunk_meta: dict, retries: int 
 
     for attempt in range(retries):
         try:
-            response = client.chat.completions.create(
-                model=LLM_MODEL,
+            import config
+            response = _get_client().chat.completions.create(
+                model=config.LLM_MODEL,
                 max_tokens=4000,
                 messages=messages,
                 timeout=30.0,
@@ -117,8 +124,9 @@ Return ONLY valid JSON:
 {{"entities": [...], "relations": [...]}}"""
 
     try:
-        response = client.chat.completions.create(
-            model=LLM_MODEL,
+        import config
+        response = _get_client().chat.completions.create(
+            model=config.LLM_MODEL,
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}],
             timeout=30.0,

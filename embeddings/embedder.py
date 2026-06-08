@@ -2,10 +2,17 @@ import openai
 from config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, EMBEDDING_MODEL, EMBEDDING_DIMENSIONS
 from graph.neo4j_client import get_client
 
-openai_client = openai.OpenAI(
-    api_key=OPENROUTER_API_KEY,
-    base_url=OPENROUTER_BASE_URL,
-)
+_openai_client = None
+
+def _get_openai_client():
+    global _openai_client
+    if _openai_client is None:
+        from config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
+        _openai_client = openai.OpenAI(
+            api_key=OPENROUTER_API_KEY,
+            base_url=OPENROUTER_BASE_URL,
+        )
+    return _openai_client
 
 
 def build_node_text(node_record: dict, relations_dict: dict = None) -> str:
@@ -61,10 +68,11 @@ Incoming relations: {', '.join(incoming) if incoming else 'none'}
 
 def embed_text(text: str) -> list[float]:
     """Embed a text string into a vector using OpenRouter embeddings API."""
-    response = openai_client.embeddings.create(
-        model=EMBEDDING_MODEL,
+    import config
+    response = _get_openai_client().embeddings.create(
+        model=config.EMBEDDING_MODEL,
         input=text[:8000],
-        dimensions=EMBEDDING_DIMENSIONS,
+        dimensions=config.EMBEDDING_DIMENSIONS,
     )
     return response.data[0].embedding
 
@@ -73,11 +81,12 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     """Embed a list of text strings into vectors in a single batch API call."""
     if not texts:
         return []
+    import config
     # Truncate each text to 8000 chars to avoid model limits
     truncated = [t[:8000] for t in texts]
-    response = openai_client.embeddings.create(
-        model=EMBEDDING_MODEL,
+    response = _get_openai_client().embeddings.create(
+        model=config.EMBEDDING_MODEL,
         input=truncated,
-        dimensions=EMBEDDING_DIMENSIONS,
+        dimensions=config.EMBEDDING_DIMENSIONS,
     )
     return [item.embedding for item in response.data]

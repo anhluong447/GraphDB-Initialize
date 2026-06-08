@@ -13,7 +13,9 @@ build/
 *.log
 .DS_Store
 /updates/
-scratch/*
-!scratch/mock_agent.py
 ngrok.exe
 ngrok_tmp.exe
+
+# MCP compiled JS outputs
+mcp/server.js
+mcp/tools.js

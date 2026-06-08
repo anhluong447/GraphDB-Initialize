@@ -153,22 +153,22 @@ Stores imports references.
 ```text
 D:\GraphRAG/
 ├── config.py                 # System configuration and environment loader
-├── docker-compose.yml        # Multi-container orchestration (Neo4j, ChromaDB)
+├── docker-compose.yml        # Multi-container orchestration (Neo4j)
 ├── start_all.bat             # 1-Click launcher script for Windows developers
+├── Makefile                  # Shortcut commands for orchestration & execution
 ├── .env                      # Local environment configurations (ignored in git)
-├── initialize_graph.py       # Main entry point for full init / incremental sync
+├── initialize_graph.py       # CLI wrapper for full init / incremental sync
 ├── knowledge_base.py         # Python module interface for autonomous agents
-├── parsers/                  # Code and Git history parsers (upgraded rich AST)
+├── core/                     # Core init & sync pipelines implementation
+├── parsers/                  # Code and Git history parsers (base & php specific)
 ├── extractors/               # Entity extractors and AI Testing Enricher
 ├── community/                # Graph clustering and community summarization
 ├── query/                    # Hybrid search and context synthesis engine
 ├── updater/                  # Filesystem Watcher and Git Hooks
 ├── visualization/            # FastAPI Backend & React Frontend Dashboard (Visualizer)
-├── mcp/                      # Model Context Protocol TS/JS server
-├── guides/                   # Usage guides and documentation
-├── _archive/                 # Archived components (like legacy REST API server)
-└── scratch/                  # Test scripts and development playground
+└── mcp/                      # Model Context Protocol TS/JS server
 ```
+
 
 *Note: Database folders and state files are kept isolated in the target codebase's `.graphrag_data/` folder.*
 

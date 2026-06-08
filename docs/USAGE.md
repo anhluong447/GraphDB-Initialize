@@ -49,3 +49,64 @@ for func in changes["changed_functions"]:
 from knowledge_base import run_sync
 run_sync()
 ```
+
+---
+
+## Tích hợp vào project khác (Git Submodule)
+
+### Thêm graphrag vào project test gen
+
+```bash
+# Trong repo project test gen
+git submodule add https://github.com/anhluong447/GraphDB-Initialize graphrag
+git submodule update --init
+pip install -r graphrag/requirements.txt
+```
+
+### Dùng trong code
+
+```python
+import sys
+sys.path.insert(0, "./graphrag")
+
+import graphrag
+
+# Cấu hình (hoặc dùng .env trong thư mục graphrag/)
+graphrag.configure(
+    codebase_path="/path/to/target-project",
+    openrouter_api_key="sk-or-...",
+    neo4j_password="yourpassword",
+)
+
+# Kiểm tra trạng thái
+print(graphrag.status())
+
+# First run
+graphrag.run_init()
+snapshot = graphrag.get_snapshot()
+
+for community in snapshot["communities"]:
+    for func in community["functions"]:
+        ctx = graphrag.get_function_context(func["name"])
+        # ... team test gen xử lý ctx ...
+        graphrag.mark_tested(func["name"])
+
+# Ongoing — gọi sau mỗi git commit mới
+graphrag.run_sync()
+changes = graphrag.get_changes("abc123f")
+for func in changes["changed_functions"]:
+    ctx = graphrag.get_function_context(func["name"])
+    # ... update test ...
+    graphrag.mark_tested(func["name"])
+```
+
+### Cập nhật submodule khi có thay đổi
+
+```bash
+cd graphrag
+git pull origin main
+cd ..
+git add graphrag
+git commit -m "chore: update graphrag submodule"
+```
+

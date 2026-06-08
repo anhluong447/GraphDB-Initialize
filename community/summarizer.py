@@ -1,12 +1,18 @@
 import openai
 import re
 from graph.neo4j_client import get_client
-from config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, LLM_MODEL
 
-client_ai = openai.OpenAI(
-    api_key=OPENROUTER_API_KEY,
-    base_url=OPENROUTER_BASE_URL,
-)
+_client_ai = None
+
+def _get_client_ai():
+    global _client_ai
+    if _client_ai is None:
+        import config
+        _client_ai = openai.OpenAI(
+            api_key=config.OPENROUTER_API_KEY,
+            base_url=config.OPENROUTER_BASE_URL,
+        )
+    return _client_ai
 
 
 def get_community_members(community_id: int) -> list[dict]:
@@ -41,8 +47,9 @@ Write a 2-3 sentence summary of this community that answers:
 
 Keep it under 200 words. Be specific, not generic."""
 
-    response = client_ai.chat.completions.create(
-        model=LLM_MODEL,
+    import config
+    response = _get_client_ai().chat.completions.create(
+        model=config.LLM_MODEL,
         max_tokens=300,
         messages=[{"role": "user", "content": prompt}]
     )
@@ -52,8 +59,9 @@ Keep it under 200 words. Be specific, not generic."""
 
 def infer_community_name(community_id: int, summary: str) -> str:
     """Use LLM to give a short name to a community."""
-    response = client_ai.chat.completions.create(
-        model=LLM_MODEL,
+    import config
+    response = _get_client_ai().chat.completions.create(
+        model=config.LLM_MODEL,
         max_tokens=20,
         messages=[{"role": "user", "content": f"Give a 2-4 word name for this code community. Return ONLY the name:\n\n{summary}"}]
     )
@@ -118,8 +126,9 @@ NAME: <your 2-4 word name>
 SUMMARY: <your 2-3 sentence summary>"""
 
             try:
-                response = client_ai.chat.completions.create(
-                    model=LLM_MODEL,
+                import config
+                response = _get_client_ai().chat.completions.create(
+                    model=config.LLM_MODEL,
                     max_tokens=350,
                     messages=[{"role": "user", "content": prompt}]
                 )
