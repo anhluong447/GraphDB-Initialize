@@ -114,6 +114,10 @@ def main():
         "--enrich", action="store_true",
         help="Run AI enrichment for functions that are missing spec (resumable)."
     )
+    parser.add_argument(
+        "--community", action="store_true",
+        help="Run community detection and summarization (resumable)."
+    )
     args = parser.parse_args()
 
     if args.status:
@@ -125,6 +129,15 @@ def main():
         _start_docker()
         from extractors.testing_enricher import enrich_all_functions
         enrich_all_functions()
+        return
+
+    if args.community:
+        print("[Community] Starting community detection and summarization...")
+        _start_docker()
+        from community.detector import detect_communities
+        from community.summarizer import summarize_all_communities
+        detect_communities()
+        summarize_all_communities()
         return
 
     sync_state = _load_sync_state()

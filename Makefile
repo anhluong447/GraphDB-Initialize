@@ -20,3 +20,6 @@ status:
 
 enrich:
 	python initialize_graph.py --enrich
+
+community:
+	python initialize_graph.py --community
