@@ -101,7 +101,7 @@ def _enrich_single_function(func: dict, retries: int = 4) -> dict | None:
                 model=config.LLM_MODEL,
                 max_tokens=2000,
                 messages=messages,
-                timeout=30.0,
+                timeout=60.0,
             )
             content = response.choices[0].message.content
             if content is None:
