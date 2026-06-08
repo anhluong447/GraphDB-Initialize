@@ -108,6 +108,10 @@ class Neo4jClient:
 
 
         # Check if anchor matches
+        anchor = node.get("anchor", "")
+        if not anchor:
+            return "".join(lines[start_line - 1 : end_line])
+
         actual_line = lines[start_line - 1].strip() if 1 <= start_line <= len(lines) else ""
         
         if actual_line == anchor:
