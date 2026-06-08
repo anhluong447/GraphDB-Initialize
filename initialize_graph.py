@@ -118,6 +118,10 @@ def main():
         "--community", action="store_true",
         help="Run community detection and summarization (resumable)."
     )
+    parser.add_argument(
+        "--semantics", action="store_true",
+        help="Run LLM semantic extraction (Concepts, Features, Risks, Decisions) on codebase."
+    )
     args = parser.parse_args()
 
     if args.status:
@@ -134,6 +138,19 @@ def main():
     if args.community:
         print("[Community] Starting community detection and summarization...")
         _start_docker()
+        from community.detector import detect_communities
+        from community.summarizer import summarize_all_communities
+        detect_communities()
+        summarize_all_communities()
+        return
+
+    if args.semantics:
+        print("[Semantics] Starting LLM semantic extraction...")
+        _start_docker()
+        from core.init_pipeline import step_parse_codebase, step_extract_semantics
+        parsed_data = step_parse_codebase(CODEBASE_PATH)
+        step_extract_semantics(parsed_data["parsed_files"], parsed_data["docs"])
+        print("[Semantics] Re-running community detection to include new semantic nodes...")
         from community.detector import detect_communities
         from community.summarizer import summarize_all_communities
         detect_communities()

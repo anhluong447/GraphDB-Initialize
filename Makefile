@@ -23,3 +23,6 @@ enrich:
 
 community:
 	python initialize_graph.py --community
+
+semantics:
+	python initialize_graph.py --semantics

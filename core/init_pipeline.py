@@ -239,7 +239,7 @@ def step_extract_semantics(parsed_files: list, docs: list):
 
     # Check if we already have semantic nodes (concepts/features) in Neo4j
     client = get_client()
-    labels = ["Concept", "Feature", "Decision", "Risk", "Task", "Module"]
+    labels = ["Concept", "Feature", "Decision", "Risk", "Task"]
     existing_count = 0
     try:
         for label in labels:
