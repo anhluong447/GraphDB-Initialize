@@ -110,10 +110,21 @@ def main():
         "--status", action="store_true",
         help="Print current graph statistics and exit."
     )
+    parser.add_argument(
+        "--enrich", action="store_true",
+        help="Run AI enrichment for functions that are missing spec (resumable)."
+    )
     args = parser.parse_args()
 
     if args.status:
         run_status()
+        return
+
+    if args.enrich:
+        print("[Enrich] Starting AI enrichment for remaining functions...")
+        _start_docker()
+        from extractors.testing_enricher import enrich_all_functions
+        enrich_all_functions()
         return
 
     sync_state = _load_sync_state()

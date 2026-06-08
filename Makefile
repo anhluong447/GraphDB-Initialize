@@ -17,3 +17,6 @@ sync:
 
 status:
 	python initialize_graph.py --status
+
+enrich:
+	python initialize_graph.py --enrich
