@@ -7,7 +7,7 @@ This guide details the integration architecture, programmatic APIs, and status s
 ## 🏗️ 1. Architecture Overview (Direct Python Integration)
 
 The GraphRAG Knowledge Base operates on a direct local import model:
-* **GraphRAG Subsystem (Local)**: Housed in the target repository under `graphrag/`. It boots up dockerized databases (Neo4j, ChromaDB) and coordinates the AST extraction, LLM semantic enrichment, and community division.
+* **GraphRAG Subsystem (Local)**: Housed in the target repository under `graphrag/`. It boots up the dockerized database (Neo4j) and coordinates the AST extraction, LLM semantic enrichment, and community division (ChromaDB runs locally in-process).
 * **Test Agent (Client)**: The agent runs locally or in CI/CD within the target project codebase. It imports the python module interface `knowledge_base.py` directly, analyzes the codebase blueprint, and designs/saves tests directly inside the local project files.
 
 ```text
@@ -36,7 +36,7 @@ The agent initializes the GraphRAG pipeline using the python helper `run_init()`
 ```python
 from knowledge_base import run_init
 
-# Boots up Neo4j/ChromaDB containers and runs the parsing/enrichment pipeline
+# Boots up Neo4j container and runs the parsing/enrichment pipeline
 run_init()
 ```
 This runs the background thread parser, connects to the local dockerized services, and populates the graph database.

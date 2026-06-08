@@ -56,7 +56,7 @@ python graphrag/initialize_graph.py
 **Ngay khi chạy lệnh này, GraphRAG sẽ TỰ ĐỘNG làm 3 việc:**
 1.  **Tự động cập nhật `.gitignore` của dự án cha:** Thêm các thư mục `.graphrag_data/`, `venv/` của thư mục con, và file `.env` để tránh bị commit lên git.
 2.  **Tự động tạo File khởi chạy nhanh tại thư mục gốc dự án cha:** Tạo ra 2 file `run_graphrag.bat` (Windows) và `run_graphrag.sh` (Linux/macOS) ở ngay thư mục ngoài cùng.
-3.  **Tải và khởi chạy Neo4j & ChromaDB:** Chạy Docker Neo4j và tiến hành phân tích toàn bộ codebase từ đầu.
+3.  **Khởi chạy cơ sở dữ liệu Neo4j:** Chạy container Neo4j thông qua Docker (ChromaDB được chạy trực tiếp dưới dạng client SQLite cục bộ trong tiến trình Python mà không cần Docker) và tiến hành phân tích toàn bộ codebase từ đầu.
 
 ---
 

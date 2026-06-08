@@ -106,8 +106,8 @@ graphrag/
 │           ├── CommunityPanel.jsx
 │           └── SearchBar.jsx
 ├── config.py                  # cấu hình toàn cục
-├── main.py                    # entry point, chạy full pipeline
-└── docker-compose.yml         # Neo4j + ChromaDB
+├── initialize_graph.py        # entry point, chạy full pipeline
+└── docker-compose.yml         # Neo4j (ChromaDB chạy cục bộ)
 ```
 
 ---
@@ -472,17 +472,9 @@ services:
       - neo4j_data:/data
       - neo4j_logs:/logs
 
-  chromadb:
-    image: chromadb/chroma:latest
-    ports:
-      - "8000:8000"
-    volumes:
-      - chroma_data:/chroma/chroma
-
 volumes:
   neo4j_data:
   neo4j_logs:
-  chroma_data:
 ```
 
 Khởi động: `docker-compose up -d`

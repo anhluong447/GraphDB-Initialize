@@ -3,7 +3,7 @@
 ## Setup
 
 1. Copy `.env.example` → `.env`, điền `OPENROUTER_API_KEY`
-2. Đảm bảo Docker đang chạy (Neo4j + ChromaDB)
+2. Đảm bảo Docker đang chạy (Neo4j)
 3. Cài dependencies: `pip install -r requirements.txt`
 
 ## Khởi tạo lần đầu
