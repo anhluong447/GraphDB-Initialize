@@ -78,7 +78,8 @@ def _get_changed_files(repo_path: str, last_commit_hash: str) -> dict:
 
     # Filter out files in ignored directories
     def not_ignored(path):
-        parts = path.replace("\\", "/").split("/")
+        rel_path = os.path.relpath(path, repo_path).replace("\\", "/")
+        parts = rel_path.split("/")
         return not any(p in IGNORE_DIRS for p in parts)
 
     modified_abs = [f for f in modified_abs if not_ignored(f)]

@@ -51,7 +51,8 @@ Keep it under 200 words. Be specific, not generic."""
     response = _get_client_ai().chat.completions.create(
         model=config.LLM_MODEL,
         max_tokens=300,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
+        timeout=60.0
     )
 
     return response.choices[0].message.content.strip()
@@ -63,7 +64,8 @@ def infer_community_name(community_id: int, summary: str) -> str:
     response = _get_client_ai().chat.completions.create(
         model=config.LLM_MODEL,
         max_tokens=20,
-        messages=[{"role": "user", "content": f"Give a 2-4 word name for this code community. Return ONLY the name:\n\n{summary}"}]
+        messages=[{"role": "user", "content": f"Give a 2-4 word name for this code community. Return ONLY the name:\n\n{summary}"}],
+        timeout=60.0
     )
     return response.choices[0].message.content.strip()
 
@@ -130,7 +132,8 @@ SUMMARY: <your 2-3 sentence summary>"""
                 response = _get_client_ai().chat.completions.create(
                     model=config.LLM_MODEL,
                     max_tokens=350,
-                    messages=[{"role": "user", "content": prompt}]
+                    messages=[{"role": "user", "content": prompt}],
+                    timeout=30.0
                 )
                 text = response.choices[0].message.content.strip()
 

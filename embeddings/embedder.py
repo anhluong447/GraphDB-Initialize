@@ -27,6 +27,22 @@ def build_node_text(node_record: dict, relations_dict: dict = None) -> str:
     input_spec = node_record.get("input_spec", "")
     output_spec = node_record.get("output_spec", "")
 
+    if node_type == "Class":
+        client = get_client()
+        attr_result = client.run("""
+            MATCH (c:Class {name: $name})-[r:HAS_ATTRIBUTE]->(attr:ClassAttribute)
+            RETURN attr.name as name, attr.type_hint as type_hint, attr.default_value as default_value
+        """, {"name": name})
+        if attr_result:
+            attr_strings = []
+            for r in attr_result:
+                type_hint = f": {r['type_hint']}" if r['type_hint'] else ""
+                default_val = f" = {r['default_value']}" if r['default_value'] else ""
+                attr_strings.append(f"  - {r['name']}{type_hint}{default_val}")
+            if attr_strings:
+                attrs_block = "\nAttributes:\n" + "\n".join(attr_strings)
+                description = (description or "") + attrs_block
+
     if relations_dict is not None:
         rel_info = relations_dict.get(name, {"outgoing": [], "incoming": []})
         outgoing = rel_info["outgoing"]

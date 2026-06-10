@@ -19,6 +19,51 @@ def query(question: str, top_k: int = 5) -> dict:
     # Layer 4: Assemble context
     context = _assemble_context(communities, relevant_nodes, expanded_nodes)
 
+    # --- Fallback Logic (Fix C) ---
+    def count_tokens_local(text: str) -> int:
+        return len(text.split()) * 4 // 3
+
+    FALLBACK_NODE_THRESHOLD = 3
+    FALLBACK_TOKEN_THRESHOLD = 600
+
+    if len(relevant_nodes) < FALLBACK_NODE_THRESHOLD or count_tokens_local(context) < FALLBACK_TOKEN_THRESHOLD:
+        import os
+        from config import CODEBASE_PATH
+        # Extract unique file paths from matched nodes
+        seen_files = []
+        for n in relevant_nodes:
+            meta = n.get("metadata", {})
+            fp = meta.get("file")
+            if fp and fp not in seen_files:
+                seen_files.append(fp)
+        
+        fallback_parts = []
+        for f in seen_files[:2]:  # cap at 2 files to avoid token bloat
+            # Query Neo4j for nodes in this file to fetch their codes using read_node_code
+            res = client.run("""
+                MATCH (n) WHERE n.file = $file AND n.start_line IS NOT NULL AND n.end_line IS NOT NULL
+                RETURN n.file as file, n.start_line as start_line, n.end_line as end_line, n.raw_code as raw_code, n.name as name
+                ORDER BY n.start_line ASC
+            """, {"file": f})
+            
+            if res:
+                file_chunks = []
+                for record in res:
+                    node_info = dict(record)
+                    code_chunk = client.read_node_code(node_info)
+                    if code_chunk:
+                        file_chunks.append(f"# Node: {node_info.get('name')}\n{code_chunk}")
+                if file_chunks:
+                    fallback_parts.append(f"### Fallback Source for File: {f}\n```python\n" + "\n\n".join(file_chunks) + "\n```\n")
+            else:
+                # Fallback to reading the whole file using read_node_code with just file path
+                code_content = client.read_node_code({"file": f})
+                if code_content:
+                    fallback_parts.append(f"### Fallback Source for File: {f}\n```python\n{code_content}\n```\n")
+        
+        if fallback_parts:
+            context += "\n\n## Fallback Source Context\n" + "\n".join(fallback_parts)
+
     return {
         "question": question,
         "communities": communities,
@@ -66,12 +111,17 @@ def _expand_neighbors(nodes: list[dict], hops: int = 1) -> list[dict]:
             continue
 
         result = client.run("""
-            MATCH (n) WHERE n.name = $name
+            MATCH (n) WHERE n.name = $name AND n.file IS NOT NULL
             MATCH (n)-[:CALLS|IMPLEMENTS|DEPENDS_ON|RELATES_TO|CONTAINS*1..2]-(neighbor)
-            WHERE neighbor.name IS NOT NULL AND NOT neighbor:Community
-            RETURN DISTINCT neighbor.name as name,
+            WHERE neighbor.name IS NOT NULL AND neighbor.file IS NOT NULL AND NOT neighbor:Community
+            WITH DISTINCT neighbor
+            WITH neighbor,
+                 CASE WHEN neighbor.is_entry_point THEN 1 ELSE 0 END AS ep_boost,
+                 coalesce(neighbor.complexity, 0) as comp
+            RETURN neighbor.name as name,
                    labels(neighbor)[0] as type,
                    coalesce(neighbor.description, neighbor.how_it_works, neighbor.docstring) as description
+            ORDER BY ep_boost DESC, comp DESC
             LIMIT 10
         """, {"name": name})
 
@@ -120,10 +170,17 @@ def get_node_detail(name: str) -> dict:
         MATCH (n) WHERE n.name = $name
         OPTIONAL MATCH (n)-[r]->(neighbor)
         OPTIONAL MATCH (caller)-[r2]->(n)
-        RETURN n,
-               labels(n) as labels,
-               collect(DISTINCT {type: type(r), target: neighbor.name}) as outgoing,
-               collect(DISTINCT {type: type(r2), source: caller.name}) as incoming
+        OPTIONAL MATCH (n:Class)-[:HAS_ATTRIBUTE]->(attr:ClassAttribute)
+        WITH n, labels(n) as labels,
+             collect(DISTINCT {type: type(r), target: neighbor.name}) as outgoing,
+             collect(DISTINCT {type: type(r2), source: caller.name}) as incoming,
+             collect(DISTINCT {
+                 name: attr.name,
+                 type: attr.type_hint,
+                 default: attr.default_value,
+                 is_field: attr.is_dataclass_field
+             }) AS attributes
+        RETURN n, labels, outgoing, incoming, attributes
         LIMIT 1
     """, {"name": name})
 
@@ -136,10 +193,14 @@ def get_node_detail(name: str) -> dict:
     if any(l in ["Function", "Class"] for l in labels):
         node_dict["raw_code"] = client.read_node_code(node_dict)
 
+    raw_attrs = record.get("attributes", [])
+    attributes = [a for a in raw_attrs if a.get("name") is not None]
+
     return {
         "node": node_dict,
         "outgoing": record["outgoing"],
         "incoming": record["incoming"],
+        "attributes": attributes,
     }
 
 

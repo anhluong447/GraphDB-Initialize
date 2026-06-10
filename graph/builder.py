@@ -48,7 +48,9 @@ def build_file_nodes(parsed_files: list[dict]):
                     n.output = $output,
                     n.raises = $raises,
                     n.complexity = $complexity,
-                    n.annotations = $annotations
+                    n.annotations = $annotations,
+                    n.superclasses = $superclasses,
+                    n.is_entry_point = $is_entry_point
             """, {
                 "name": node["name"],
                 "file": node["file"],
@@ -65,7 +67,45 @@ def build_file_nodes(parsed_files: list[dict]):
                 "raises": node.get("raises", "[]"),
                 "complexity": node.get("complexity", 0),
                 "annotations": node.get("annotations", "[]"),
+                "superclasses": node.get("superclasses", "[]"),
+                "is_entry_point": node.get("is_entry_point", False),
             })
+
+            # Create INHERITS_FROM relationships for Class
+            if label == "Class" and node.get("superclasses"):
+                try:
+                    supers = json.loads(node["superclasses"])
+                    for parent_name in supers:
+                        client.run("""
+                            MATCH (c:Class {name: $class_name, file: $file})
+                            MERGE (p:Class {name: $parent_name})
+                            MERGE (c)-[:INHERITS_FROM]->(p)
+                        """, {
+                            "class_name": node["name"],
+                            "file": node["file"],
+                            "parent_name": parent_name
+                        })
+                except Exception as e:
+                    print(f"Error building inheritance relationship: {e}")
+
+            # Create ClassAttribute nodes and link them
+            if label == "Class":
+                for attr in node.get("attributes", []):
+                    client.run("""
+                        MERGE (c:Class {name: $class_name, file: $file})
+                        MERGE (a:ClassAttribute {name: $attr_name, file: $file})
+                        SET a.type_hint = $type_hint,
+                            a.default_value = $default_value,
+                            a.is_dataclass_field = $is_dataclass_field
+                        MERGE (c)-[:HAS_ATTRIBUTE]->(a)
+                    """, {
+                        "class_name": node["name"],
+                        "file": node["file"],
+                        "attr_name": attr["name"],
+                        "type_hint": attr.get("type_hint", ""),
+                        "default_value": attr.get("default_value", None),
+                        "is_dataclass_field": attr.get("is_dataclass_field", False),
+                    })
 
             # CONTAINS edge: File -> Function
             client.run(f"""

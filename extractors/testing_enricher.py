@@ -71,6 +71,7 @@ RULES:
   - If "mock": include "target" (exact import path to mock) and "reason".
   - If "test_case": include "name", "path" (happy/error/edge), and "description".
   - Never return a plain string for test_recommendations.
+- If this function is an event handler, lifecycle hook, loader, or bootstrap function, explicitly state so in how_it_works. Example tags: [ENTRY_POINT], [LIFECYCLE], [LOADER].
 - Return ONLY valid JSON, no markdown.
 """
 

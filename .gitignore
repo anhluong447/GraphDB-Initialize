@@ -15,7 +15,8 @@ build/
 /updates/
 ngrok.exe
 ngrok_tmp.exe
-
+evals/
+MockProject/
 # MCP compiled JS outputs
 mcp/server.js
 mcp/tools.js

@@ -99,6 +99,108 @@ def parse_file(file_path: str) -> dict:
     }
 
 
+def _extract_class_attributes(class_node, source_bytes: bytes, lang: str, decorators: list[str]) -> list[dict]:
+    """Extract attributes defined in class body or within __init__ method."""
+    attributes = []
+    is_dataclass = "dataclass" in decorators or any("dataclass" in d for d in decorators)
+
+    body = class_node.child_by_field_name("body")
+    if not body:
+        return []
+
+    def walk(node, in_init=False):
+        is_init_method = False
+        if node.type == "function_definition":
+            name_node = node.child_by_field_name("name")
+            if name_node:
+                name_text = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8", errors="ignore")
+                if name_text == "__init__":
+                    is_init_method = True
+
+        # Extract self.x = ... inside __init__
+        if in_init and node.type == "assignment":
+            left = node.child_by_field_name("left") or node.child_by_field_name("name")
+            right = node.child_by_field_name("right") or node.child_by_field_name("value")
+            if left and left.type == "attribute":
+                obj = left.child_by_field_name("object")
+                attr = left.child_by_field_name("attribute")
+                if obj and attr:
+                    obj_text = source_bytes[obj.start_byte:obj.end_byte].decode("utf-8", errors="ignore")
+                    if obj_text == "self":
+                        attr_name = source_bytes[attr.start_byte:attr.end_byte].decode("utf-8", errors="ignore")
+                        val_text = ""
+                        if right:
+                            val_text = source_bytes[right.start_byte:right.end_byte].decode("utf-8", errors="ignore").strip()
+                        if not any(a["name"] == attr_name for a in attributes):
+                            attributes.append({
+                                "name": attr_name,
+                                "type_hint": "",
+                                "default_value": val_text or None,
+                                "is_dataclass_field": False
+                            })
+
+        # Extract class-level fields (annotated_assignment or normal assignment)
+        elif not in_init and node.parent == body:
+            target_node = None
+            if node.type == "expression_statement":
+                for child in node.children:
+                    if child.type in ("assignment", "annotated_assignment"):
+                        target_node = child
+                        break
+            elif node.type in ("assignment", "annotated_assignment"):
+                target_node = node
+
+            if target_node:
+                left = target_node.child_by_field_name("left") or target_node.child_by_field_name("name")
+                if not left and target_node.children:
+                    left = target_node.children[0]
+                    
+                if left and left.type == "identifier":
+                    attr_name = source_bytes[left.start_byte:left.end_byte].decode("utf-8", errors="ignore")
+                    
+                    type_node = target_node.child_by_field_name("type") or target_node.child_by_field_name("annotation")
+                    if not type_node:
+                        for child in target_node.children:
+                            if child.type == "type":
+                                type_node = child
+                                break
+                    
+                    type_text = ""
+                    if type_node:
+                        type_text = source_bytes[type_node.start_byte:type_node.end_byte].decode("utf-8", errors="ignore").strip()
+                        
+                    right = target_node.child_by_field_name("right") or target_node.child_by_field_name("value")
+                    if not right:
+                        # Find child after '=' or the last child
+                        found_eq = False
+                        for child in target_node.children:
+                            if child.type == "=":
+                                found_eq = True
+                                continue
+                            if found_eq:
+                                right = child
+                                break
+                                
+                    val_text = ""
+                    if right and right != left and right != type_node:
+                        val_text = source_bytes[right.start_byte:right.end_byte].decode("utf-8", errors="ignore").strip()
+                        if val_text == "=":
+                            val_text = ""
+                            
+                    attributes.append({
+                        "name": attr_name,
+                        "type_hint": type_text,
+                        "default_value": val_text or None,
+                        "is_dataclass_field": is_dataclass
+                    })
+
+        for child in node.children:
+            walk(child, in_init=in_init or is_init_method)
+
+    walk(body)
+    return attributes
+
+
 def _extract_nodes(node, source_bytes: bytes, file_path: str, lang: str, result: list, parent_class=None):
     """Recursively walk AST and extract function/class definitions with rich metadata."""
     extractable = {
@@ -131,6 +233,26 @@ def _extract_nodes(node, source_bytes: bytes, file_path: str, lang: str, result:
         complexity = _compute_complexity(node, source_bytes) if is_func else 0
         decorators = _extract_decorators(node, source_bytes, lang)
 
+        # Extract class attributes, superclasses, and entry point flag
+        class_attributes = []
+        superclasses = []
+        is_entry_point = False
+        if not is_func:
+            class_attributes = _extract_class_attributes(node, source_bytes, lang, decorators)
+            # Extract superclasses (base classes)
+            argument_list = node.child_by_field_name("superclasses")
+            if not argument_list:
+                for child in node.children:
+                    if child.type == "argument_list":
+                        argument_list = child
+                        break
+            if argument_list:
+                for arg in argument_list.children:
+                    if arg.type in ("identifier", "attribute"):
+                        superclasses.append(source_bytes[arg.start_byte:arg.end_byte].decode("utf-8", errors="ignore"))
+        else:
+            is_entry_point = any(name.startswith(p) for p in ['load_', 'on_', 'setup_', 'init_', 'start_', 'register_'])
+
         result.append({
             "type": node.type,
             "name": name,
@@ -150,6 +272,9 @@ def _extract_nodes(node, source_bytes: bytes, file_path: str, lang: str, result:
             "raises": json.dumps(raises),          # JSON string for Neo4j storage
             "complexity": complexity,
             "annotations": json.dumps(decorators), # JSON string for Neo4j storage
+            "attributes": class_attributes,        # Parsed attributes
+            "superclasses": json.dumps(superclasses), # JSON string of base classes
+            "is_entry_point": is_entry_point,     # Boolean flag for entry point (Fix B)
         })
 
         # Track parent class name for methods

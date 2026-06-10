@@ -12,7 +12,7 @@ import json
 from graph.neo4j_client import get_client
 
 
-def get_function_context(function_name: str) -> dict:
+def get_function_context(function_name: str, file_path: str = None) -> dict:
     """
     Lấy full context của 1 function để gen test.
 
@@ -28,12 +28,14 @@ def get_function_context(function_name: str) -> dict:
     """
     client = get_client()
 
-    result = client.run("""
-        MATCH (f:Function {name: $name})
+    where_clause = "WHERE f.file = $file" if file_path else "WHERE f.file IS NOT NULL"
+    result = client.run(f"""
+        MATCH (f:Function {{name: $name}})
+        {where_clause}
         OPTIONAL MATCH (f)-[:BELONGS_TO]->(c:Community)
         RETURN f, c.id as cid, c.name as cname, c.summary as csummary
         LIMIT 1
-    """, {"name": function_name})
+    """, {"name": function_name, "file": file_path})
 
     if not result:
         return {}
@@ -61,17 +63,18 @@ def get_function_context(function_name: str) -> dict:
             "summary": record["csummary"],
         }
 
-    calls_outside = client.run("""
-        MATCH (f:Function {name: $name})-[:CALLS]->(callee)
-        WHERE callee.name IS NOT NULL
+    where_clause_f = "AND f.file = $file" if file_path else ""
+    calls_outside = client.run(f"""
+        MATCH (f:Function {{name: $name}})-[:CALLS]->(callee)
+        WHERE callee.name IS NOT NULL {where_clause_f}
         RETURN callee.name as name, callee.file as file
-    """, {"name": function_name})
+    """, {"name": function_name, "file": file_path})
 
-    called_by = client.run("""
-        MATCH (caller)-[:CALLS]->(f:Function {name: $name})
-        WHERE caller.name IS NOT NULL
+    called_by = client.run(f"""
+        MATCH (caller)-[:CALLS]->(f:Function {{name: $name}})
+        WHERE caller.name IS NOT NULL {where_clause_f}
         RETURN caller.name as name, caller.file as file
-    """, {"name": function_name})
+    """, {"name": function_name, "file": file_path})
 
     return {
         "function": func_data,
@@ -81,12 +84,49 @@ def get_function_context(function_name: str) -> dict:
     }
 
 
+def get_class_context(class_name: str, file_path: str = None) -> dict:
+    """
+    Lấy full context của 1 class kèm attributes để gen test hoặc hiển thị.
+    """
+    client = get_client()
+
+    where_clause = "WHERE c.file = $file" if file_path else "WHERE c.file IS NOT NULL"
+    result = client.run(f"""
+        MATCH (c:Class {{name: $name}})
+        {where_clause}
+        OPTIONAL MATCH (c)-[:HAS_ATTRIBUTE]->(attr:ClassAttribute)
+        WITH c, collect({{
+            name: attr.name,
+            type: attr.type_hint,
+            default: attr.default_value,
+            is_field: attr.is_dataclass_field
+        }}) AS attributes
+        RETURN c, attributes
+        LIMIT 1
+    """, {"name": class_name, "file": file_path})
+
+    if not result:
+        return {}
+
+    record = result[0]
+    class_data = dict(record["c"])
+    
+    raw_attrs = record.get("attributes", [])
+    attributes = [a for a in raw_attrs if a.get("name") is not None]
+    class_data["attributes"] = attributes
+
+    # Đọc source code từ file thật (dùng start_line/end_line/anchor)
+    class_data["source_code"] = client.read_node_code(class_data)
+
+    return class_data
+
+
 def get_snapshot() -> dict:
     """
     Lấy toàn bộ functions hiện tại, nhóm theo community, kèm priority score.
     Dùng cho first run — biết toàn bộ codebase cần gen test gì.
 
-    priority_score = complexity*0.3 + in_degree*0.4 + commit_count*0.3
+    priority_score = complexity*0.3 + in_degree*0.4 + commit_count*0.3 + entry_point_boost
     """
     client = get_client()
 
