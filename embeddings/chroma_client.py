@@ -5,6 +5,12 @@ from config import CHROMA_PATH, EMBEDDING_DIMENSIONS
 
 chroma = chromadb.PersistentClient(path=CHROMA_PATH)
 
+# chroma = chromadb.HttpClient(
+#     host="chromadb.tktrev.org",
+#     port=443,
+#     ssl=True
+# )
+
 class CollectionProxy:
     @property
     def _collection(self):

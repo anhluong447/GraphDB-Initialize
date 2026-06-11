@@ -10,9 +10,18 @@ class Neo4jClient:
     def close(self):
         self.driver.close()
 
-    def run(self, query: str, params: dict = None):
-        with self.driver.session() as session:
-            return list(session.run(query, params or {}))
+    def run(self, query: str, params: dict = None, retries=10, delay=3):
+        import time
+        from neo4j.exceptions import ServiceUnavailable, SessionError
+        last_err = None
+        for attempt in range(retries):
+            try:
+                with self.driver.session() as session:
+                    return list(session.run(query, params or {}))
+            except (ServiceUnavailable, SessionError) as e:
+                last_err = e
+                time.sleep(delay)
+        raise last_err
 
     def create_indexes(self):
         """Create indexes for faster queries."""

@@ -24,7 +24,7 @@ from knowledge_base import (
     run_sync,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.0.3"
 
 __all__ = [
     "configure",
@@ -112,6 +112,16 @@ def configure(
 
     if embedding_dimensions:
         _cfg.EMBEDDING_DIMENSIONS = embedding_dimensions
+
+    # Propagate changes to all imported modules to prevent stale imports
+    import sys
+    for mod_name, mod in list(sys.modules.items()):
+        if mod and (mod_name.startswith("nelgraph.") or mod_name in ["initialize_graph", "knowledge_base", "core.init_pipeline", "core.sync_pipeline", "graph.builder", "graph.neo4j_client", "embeddings.chroma_client", "embeddings.embedder", "extractors.llm_extractor", "extractors.testing_enricher", "parsers.git_parser", "updater.git_hook", "updater.watcher"]):
+            for key in ["CODEBASE_PATH", "GRAPHRAG_DATA_DIR", "NEO4J_DATA_DIR", "NEO4J_LOGS_DIR", "CHROMA_PATH", "SYNC_STATE_PATH", "OPENROUTER_API_KEY", "LLM_MODEL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS", "NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD"]:
+                if hasattr(_cfg, key):
+                    val = getattr(_cfg, key)
+                    if hasattr(mod, key):
+                        setattr(mod, key, val)
 
 
 def _reset_ai_clients():

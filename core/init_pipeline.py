@@ -124,71 +124,7 @@ def _auto_update_parent_gitignore():
         print(f"[Sync] Warning: Could not update parent .gitignore: {e}")
 
 
-def _auto_generate_parent_launchers():
-    """Generate run_graphrag.bat and run_graphrag.sh at the parent project root."""
-    subfolder_name = os.path.relpath(GRAPHRAG_ROOT, CODEBASE_PATH).replace("\\", "/")
 
-    # 1. Windows Launcher
-    bat_path = os.path.join(CODEBASE_PATH, "run_graphrag.bat")
-    bat_content = f"""@echo off
-setlocal
-cd /d "%~dp0"
-if not exist "{subfolder_name}\\venv" (
-    echo [GraphRAG] Virtual environment not found in {subfolder_name}. Creating one...
-    python -m venv {subfolder_name}\\venv
-    if errorlevel 1 (
-        echo Error: Failed to create virtual environment.
-        exit /b 1
-    )
-    echo [GraphRAG] Installing dependencies...
-    call {subfolder_name}\\venv\\Scripts\\activate.bat
-    pip install -r {subfolder_name}\\requirements.txt
-) else (
-    call {subfolder_name}\\venv\\Scripts\\activate.bat
-)
-python {subfolder_name}\\initialize_graph.py %*
-"""
-
-    # 2. Unix Launcher
-    sh_path = os.path.join(CODEBASE_PATH, "run_graphrag.sh")
-    sh_content = f"""#!/bin/bash
-cd "$(dirname "$0")"
-if [ ! -d "{subfolder_name}/venv" ]; then
-    echo "[GraphRAG] Virtual environment not found in {subfolder_name}. Creating one..."
-    python3 -m venv {subfolder_name}/venv
-    if [ $? -ne 0 ]; then
-        echo "Error: Failed to create virtual environment."
-        exit 1
-    fi
-    echo "[GraphRAG] Installing dependencies..."
-    source {subfolder_name}/venv/bin/activate
-    pip install -r {subfolder_name}/requirements.txt
-else
-    source {subfolder_name}/venv/bin/activate
-fi
-python3 {subfolder_name}/initialize_graph.py "$@"
-"""
-
-    try:
-        # Write .bat
-        with open(bat_path, "w", encoding="utf-8", newline="\r\n") as f:
-            f.write(bat_content)
-        
-        # Write .sh
-        with open(sh_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(sh_content)
-        
-        # Make sh executable
-        try:
-            import stat
-            st = os.stat(sh_path)
-            os.chmod(sh_path, st.st_mode | stat.S_IEXEC)
-        except Exception:
-            pass
-            
-        print("[Sync] Generated project root launchers: run_graphrag.bat & run_graphrag.sh")
-    except Exception as e:
-        print(f"[Sync] Warning: Could not generate launcher scripts: {e}")
 
 
 def step_start_databases():
@@ -334,8 +270,64 @@ def run_full_init():
         "mode": "full_init",
     })
 
+    _generate_agent_query_guide()
+
     print("\n" + "=" * 60)
     print("✅ Full initialization complete!")
     print("=" * 60)
     print(f"   Data stored at: {GRAPHRAG_DATA_DIR}")
     print(f"   Neo4j Browser:  http://localhost:7474")
+
+
+def _generate_agent_query_guide():
+    agent_dir = os.path.join(CODEBASE_PATH, "agent")
+    os.makedirs(agent_dir, exist_ok=True)
+    guide_path = os.path.join(agent_dir, "agent_query.md")
+    
+    guide_content = """# nelgraph — Agent Interface
+
+## Setup (đã xong nếu user chạy `nelgraph init`)
+Neo4j: bolt://127.0.0.1:7687 | user: neo4j | pass: graphrag123
+ChromaDB: local SQLite tại .graphrag_data/chromadb/
+
+## Import
+import nelgraph
+
+## 5 functions cần biết
+
+### 1. search(query, top_k=10) → list[dict]
+Semantic search toàn codebase. Dùng khi không biết tên hàm cụ thể.
+Input : query string bằng tiếng Anh
+Output: [{"name": str, "file": str, "score": float, "description": str}]
+
+### 2. get_function_context(name) → dict
+Lấy full context 1 hàm: source code, dependencies, test specs.
+Dùng khi đã biết tên hàm cần phân tích.
+Output: {"name", "file", "raw_code", "how_it_works", "inputs",
+         "edge_cases", "test_recommendations", "callers", "callees"}
+
+### 3. get_snapshot() → dict
+Xem toàn bộ codebase theo community + priority score.
+Dùng khi cần overview để lên kế hoạch test.
+Output: {"total": int, "communities": [{"id", "summary", "functions": [...]}]}
+
+### 4. get_changes(commit_hash) → dict
+Lấy danh sách hàm bị thay đổi trong 1 commit.
+Dùng cho incremental testing.
+Output: {"risk_level": str, "changed_functions": [...]}
+
+### 5. mark_tested(function_name) → bool
+Đánh dấu hàm đã được test. Persist vào Neo4j.
+
+## Workflow gợi ý cho test agent
+1. get_snapshot() → chọn community ưu tiên theo priority_score
+2. get_function_context(name) cho từng hàm → đọc test_recommendations
+3. Viết test → mark_tested(name)
+4. Lặp lại với get_changes() sau mỗi commit
+"""
+    try:
+        with open(guide_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(guide_content)
+        print(f"[Init] Generated agent query guide at: {guide_path}")
+    except Exception as e:
+        print(f"[Init] Warning: Could not generate agent query guide: {e}")

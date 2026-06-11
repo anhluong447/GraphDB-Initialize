@@ -29,7 +29,6 @@ from core.init_pipeline import (
     _start_docker,
     _load_sync_state,
     _auto_update_parent_gitignore,
-    _auto_generate_parent_launchers,
 )
 from core.sync_pipeline import run_incremental_sync
 
@@ -97,7 +96,16 @@ def run_status():
 def main():
     # Automatically handle setup and wrappers for parent project
     _auto_update_parent_gitignore()
-    _auto_generate_parent_launchers()
+
+    # Prompt user to verify Docker is running
+    if "--status" not in sys.argv and sys.stdout.isatty():
+        try:
+            confirm = input("Bạn đã bật Docker chưa? (y/n) [y]: ").strip().lower()
+            if confirm not in ("", "y", "yes"):
+                print("Vui lòng bật Docker trước khi chạy.")
+                sys.exit(1)
+        except (KeyboardInterrupt, EOFError):
+            sys.exit(1)
 
     parser = argparse.ArgumentParser(
         description="GraphRAG Knowledge Base — Initialize or sync the code knowledge graph."
