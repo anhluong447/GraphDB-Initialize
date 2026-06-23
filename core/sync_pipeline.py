@@ -210,3 +210,10 @@ def run_incremental_sync():
     print("✅ Incremental sync complete!")
     print("=" * 60)
     print(f"   Modified: {len(modified_files)} | Deleted: {len(deleted_files)}")
+
+    # Close Neo4j client connection
+    try:
+        from graph.neo4j_client import get_client
+        get_client().close()
+    except Exception:
+        pass

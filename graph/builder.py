@@ -19,7 +19,19 @@ def build_file_nodes(parsed_files: list[dict]):
         """, {"path": parsed["file"], "language": parsed["language"]})
 
         for node in parsed["nodes"]:
-            label = _node_type_to_label(node["type"])
+            base_label = _node_type_to_label(node["type"])
+            is_test = False
+            file_name = node["file"].replace("\\", "/").split("/")[-1].lower()
+            node_name = node["name"].lower()
+            if "test_" in file_name or "_test" in file_name or file_name.startswith("test") or node_name.startswith("test_") or node_name.endswith("_test"):
+                is_test = True
+
+            label = base_label
+            if is_test:
+                if base_label == "Function":
+                    label = "Function:TestFunction"
+                elif base_label == "Class":
+                    label = "Class:TestClass"
 
             # Create Function/Class node with rich testing metadata
             # raw_code is stored directly in Neo4j so remote clients
@@ -47,8 +59,9 @@ def build_file_nodes(parsed_files: list[dict]):
                     n.inputs = $inputs,
                     n.output = $output,
                     n.raises = $raises,
-                    n.complexity = $complexity,
-                    n.annotations = $annotations
+                    n.annotations = $annotations,
+                    n.superclasses = $superclasses,
+                    n.is_test = $is_test
             """, {
                 "name": node["name"],
                 "file": node["file"],
@@ -65,6 +78,8 @@ def build_file_nodes(parsed_files: list[dict]):
                 "raises": node.get("raises", "[]"),
                 "complexity": node.get("complexity", 0),
                 "annotations": node.get("annotations", "[]"),
+                "superclasses": node.get("superclasses", "[]"),
+                "is_test": is_test,
             })
 
             # CONTAINS edge: File -> Function
@@ -74,17 +89,22 @@ def build_file_nodes(parsed_files: list[dict]):
                 MERGE (f)-[:CONTAINS]->(n)
             """, {"file_path": node["file"], "name": node["name"]})
 
-            # CALLS edges
-            for called in node.get("calls", []):
-                client.run(f"""
-                    MATCH (caller:{label} {{name: $caller, file: $file}})
-                    MERGE (callee:Function {{name: $callee}})
-                    MERGE (caller)-[:CALLS]->(callee)
-                """, {
-                    "caller": node["name"],
-                    "file": node["file"],
-                    "callee": called.split(".")[-1],  # normalize "obj.method" -> "method"
-                })
+            # INHERITS_FROM edges for Class inheritance
+            if base_label == "Class" and node.get("superclasses"):
+                try:
+                    superclasses = json.loads(node["superclasses"]) if isinstance(node["superclasses"], str) else node["superclasses"]
+                    for base in superclasses:
+                        client.run("""
+                            MATCH (child:Class {name: $child_name, file: $file})
+                            MERGE (parent:Class {name: $parent_name})
+                            MERGE (child)-[:INHERITS_FROM]->(parent)
+                        """, {
+                            "child_name": node["name"],
+                            "file": node["file"],
+                            "parent_name": base
+                        })
+                except Exception:
+                    pass
 
         # IMPORTS: Create Module nodes and File -[:IMPORTS]-> Module edges
         for imp in parsed.get("imports", []):
@@ -120,7 +140,43 @@ def build_file_nodes(parsed_files: list[dict]):
                     "module_name": module_name,
                 })
 
-    print(f"[Builder] File and function nodes built ({len(parsed_files)} files).")
+    # Second pass: Link CALLS relationships using MATCH (no new callee nodes created)
+    print("[Builder] Linking call relationships...")
+    linked_calls = 0
+    for parsed in parsed_files:
+        lang = parsed.get("language")
+        for node in parsed["nodes"]:
+            # Reconstruct the caller label based on type and test status
+            caller_label = _node_type_to_label(node["type"])
+            is_test = False
+            file_name = node["file"].replace("\\", "/").split("/")[-1].lower()
+            node_name = node["name"].lower()
+            if "test_" in file_name or "_test" in file_name or file_name.startswith("test") or node_name.startswith("test_") or node_name.endswith("_test"):
+                is_test = True
+            if is_test:
+                if caller_label == "Function":
+                    caller_label = "Function:TestFunction"
+                elif caller_label == "Class":
+                    caller_label = "Class:TestClass"
+
+            for called in node.get("calls", []):
+                callee_name = called.split(".")[-1]
+                if _is_builtin(callee_name, lang):
+                    continue
+
+                client.run(f"""
+                    MATCH (caller:{caller_label} {{name: $caller, file: $file}})
+                    MATCH (callee)
+                    WHERE (callee:Function OR callee:Class) AND callee.name = $callee
+                    MERGE (caller)-[:CALLS]->(callee)
+                """, {
+                    "caller": node["name"],
+                    "file": node["file"],
+                    "callee": callee_name,
+                })
+                linked_calls += 1
+
+    print(f"[Builder] File and function nodes built ({len(parsed_files)} files). Linked {linked_calls} calls.")
 
 
 def build_git_nodes(commits: list[dict]):
@@ -272,3 +328,50 @@ def link_commits_to_functions(commits: list[dict], parsed_files: list[dict], rep
                             break  # One link per function per commit is enough
 
     print(f"[Builder] Linked {linked} commit-function relationships.")
+
+
+# --- Language Built-ins Lists ---
+
+PYTHON_BUILTINS = {
+    "abs", "aiter", "all", "any", "anext", "ascii", "bin", "bool", "breakpoint", "bytearray",
+    "bytes", "callable", "chr", "classmethod", "compile", "complex", "delattr", "dict", "dir",
+    "divmod", "enumerate", "eval", "exec", "filter", "float", "format", "frozenset", "getattr",
+    "globals", "hasattr", "hash", "help", "hex", "id", "input", "int", "isinstance", "issubclass",
+    "iter", "len", "list", "locals", "map", "max", "memoryview", "min", "next", "object", "oct",
+    "open", "ord", "pow", "print", "property", "range", "repr", "reversed", "round", "set",
+    "setattr", "slice", "sorted", "staticmethod", "str", "sum", "super", "tuple", "type", "vars",
+    "zip", "__import__", "BaseException", "Exception", "TypeError", "ValueError", "KeyError",
+    "IndexError", "AttributeError", "NameError", "RuntimeError", "StopIteration", "AssertionError",
+}
+
+JS_TS_BUILTINS = {
+    "console", "log", "error", "warn", "info", "debug", "alert", "prompt", "confirm",
+    "require", "define", "module", "exports", "import", "eval", "parseInt", "parseFloat",
+    "isNaN", "isFinite", "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent",
+    "Object", "Function", "Boolean", "Symbol", "Error", "EvalError", "InternalError",
+    "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "Number",
+    "Math", "Date", "String", "RegExp", "Array", "Int8Array", "Uint8Array", "Uint8ClampedArray",
+    "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float32Array", "Float64Array",
+    "Map", "Set", "WeakMap", "WeakSet", "Promise", "Generator", "GeneratorFunction",
+    "AsyncFunction", "JSON", "Proxy", "Reflect", "setTimeout", "clearTimeout", "setInterval",
+    "clearInterval", "setImmediate", "clearImmediate", "requestAnimationFrame", "cancelAnimationFrame",
+}
+
+PHP_BUILTINS = {
+    "echo", "print", "die", "exit", "isset", "empty", "unset", "include", "include_once",
+    "require", "require_once", "array", "eval", "list", "var_dump", "print_r",
+    "strlen", "strpos", "substr", "in_array", "array_key_exists", "count", "is_array",
+    "explode", "implode", "sprintf", "trim", "strtolower", "strtoupper", "define",
+    "defined", "function_exists", "class_exists", "method_exists", "property_exists",
+}
+
+def _is_builtin(name: str, language: str) -> bool:
+    if not name:
+        return False
+    if language == "python" and name in PYTHON_BUILTINS:
+        return True
+    if language in ("javascript", "typescript") and name in JS_TS_BUILTINS:
+        return True
+    if language == "php" and name in PHP_BUILTINS:
+        return True
+    return False

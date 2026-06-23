@@ -17,7 +17,7 @@ ngrok.exe
 ngrok_tmp.exe
 demo_project/
 nelgraph/
-
+scratch/
 # MCP compiled JS outputs
 mcp/server.js
 mcp/tools.js

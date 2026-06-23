@@ -99,6 +99,7 @@ make up           # Start Neo4j container in background
 make init         # Auto-detect: perform full initialization or incremental sync
 make force-init   # Wipe database and perform full re-ingestion
 make status       # Inspect current database metrics & status
+make hook         # Install post-commit hook manually
 make down         # Stop Neo4j container
 ```
 

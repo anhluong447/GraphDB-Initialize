@@ -272,59 +272,147 @@ def run_full_init():
 
     _generate_agent_query_guide()
 
+    # Automatically install git post-commit hook
+    from updater.git_hook import install_hook
+    hook_installed = install_hook()
+
+    # Close Neo4j client connection
+    try:
+        from graph.neo4j_client import get_client
+        get_client().close()
+    except Exception:
+        pass
+
     print("\n" + "=" * 60)
     print("✅ Full initialization complete!")
     print("=" * 60)
     print(f"   Data stored at: {GRAPHRAG_DATA_DIR}")
     print(f"   Neo4j Browser:  http://localhost:7474")
+    if not hook_installed:
+        print("\n[GitHook] ⚠ Warning: Target directory is not a Git repository. The graph will not be auto-updated on commit.")
 
 
 def _generate_agent_query_guide():
-    agent_dir = os.path.join(CODEBASE_PATH, "agent")
+    agent_dir = os.path.join(CODEBASE_PATH, ".agents", "nelgraph")
     os.makedirs(agent_dir, exist_ok=True)
-    guide_path = os.path.join(agent_dir, "agent_query.md")
+    guide_path = os.path.join(agent_dir, "SKILL.md")
     
     guide_content = """# nelgraph — Agent Interface
 
-## Setup (đã xong nếu user chạy `nelgraph init`)
-Neo4j: bolt://127.0.0.1:7687 | user: neo4j | pass: graphrag123
-ChromaDB: local SQLite tại .graphrag_data/chromadb/
+## ---
+name: nelgraph
+description: Query a codebase knowledge graph to understand code structure, function logic, dependencies, and test recommendations. Use when you need to analyze, test, or modify an existing codebase.
+---
 
-## Import
+# nelgraph — Agent Interface
+
+You have access to a codebase knowledge graph via `nelgraph`.
+Always query the graph before writing any code, tests, or analysis.
+Neo4j and ChromaDB are already running if the user ran `nelgraph init`.
+
+## When to use this skill
+
+- Use this when the task involves reading, analyzing, or testing existing code
+- Use this before writing any new code that touches existing functions
+- Use this when you need to understand how functions relate to each other
+- Use this when working from a commit or PR and need to know what changed
+
+## How to use it
+
+### Step 0: Sync before starting
+
+Always run this at the start of a session to avoid stale data:
+
+```python
+import subprocess
+subprocess.run(["nelgraph", "sync"], check=True)
+```
+
+### Step 1: Get your bearings
+
+If you're starting fresh and don't know the codebase:
+
+```python
 import nelgraph
 
-## 5 functions cần biết
+snap = nelgraph.get_snapshot()
+# → {"total": int, "communities": [{"id", "summary", "functions": [...]}]}
+# functions inside each community are sorted by priority_score
+# (complexity + call frequency + change count)
+```
 
-### 1. search(query, top_k=10) → list[dict]
-Semantic search toàn codebase. Dùng khi không biết tên hàm cụ thể.
-Input : query string bằng tiếng Anh
-Output: [{"name": str, "file": str, "score": float, "description": str}]
+If you're working from a specific commit:
 
-### 2. get_function_context(name) → dict
-Lấy full context 1 hàm: source code, dependencies, test specs.
-Dùng khi đã biết tên hàm cần phân tích.
-Output: {"name", "file", "raw_code", "how_it_works", "inputs",
-         "edge_cases", "test_recommendations", "callers", "callees"}
+```python
+changes = nelgraph.get_changes("a3f9c12")
+# → {"risk_level": "high"|"medium"|"low", "changed_functions": [...]}
+```
 
-### 3. get_snapshot() → dict
-Xem toàn bộ codebase theo community + priority score.
-Dùng khi cần overview để lên kế hoạch test.
-Output: {"total": int, "communities": [{"id", "summary", "functions": [...]}]}
+### Step 2: Find the functions you need
 
-### 4. get_changes(commit_hash) → dict
-Lấy danh sách hàm bị thay đổi trong 1 commit.
-Dùng cho incremental testing.
-Output: {"risk_level": str, "changed_functions": [...]}
+If you don't know the function name, search by intent:
 
-### 5. mark_tested(function_name) → bool
-Đánh dấu hàm đã được test. Persist vào Neo4j.
+```python
+results = nelgraph.search("how does user authentication work", top_k=10)
+# → [{"name": str, "file": str, "score": float, "description": str}, ...]
+```
 
-## Workflow gợi ý cho test agent
-1. get_snapshot() → chọn community ưu tiên theo priority_score
-2. get_function_context(name) cho từng hàm → đọc test_recommendations
-3. Viết test → mark_tested(name)
-4. Lặp lại với get_changes() sau mỗi commit
+If you know the name, go straight to full context:
+
+```python
+ctx = nelgraph.get_function_context("login")
+# → {
+#     "name", "file", "raw_code",
+#     "how_it_works",           # plain-English summary
+#     "inputs",                 # parameters + types
+#     "edge_cases",             # list of boundary scenarios
+#     "test_recommendations",   # what to mock, what test cases to write
+#     "callers",                # functions that call this one
+#     "callees"                 # functions this one calls
+#   }
+```
+
+> **Ambiguous name?** If multiple classes have the same method name (e.g. `__init__`, `execute`),
+> the graph may return the wrong one. Disambiguate with `class_name` or `file`:
+> ```python
+> nelgraph.get_function_context("__init__", class_name="ShimizuBot")
+> nelgraph.get_function_context("execute", file="src/services/runner.py")
+> ```
+
+### Step 3: Mark progress
+
+After writing and verifying a test, persist the result to the graph:
+
+```python
+nelgraph.mark_tested("login")  # → True
+```
+
+---
+
+## Quick reference
+
+| Situation                                    | Call                                         |
+| -------------------------------------------- | -------------------------------------------- |
+| Starting fresh, don't know the codebase      | `get_snapshot()`                             |
+| User mentions a specific function            | `get_function_context(name)`                 |
+| Same method name appears in multiple classes | `get_function_context(name, class_name=...)` |
+| Looking for functions related to a feature   | `search(query)`                              |
+| Working on a specific commit or PR           | `get_changes(commit_hash)`                   |
+| After writing and verifying a test           | `mark_tested(name)`                          |
+
+---
+
+## Rules
+
+1. **Always sync first.** Run `nelgraph sync` before starting any session to avoid working with stale data.
+2. **Always query before writing.** Never guess at function signatures, logic, or dependencies — `get_function_context()` has the source code.
+3. **Use test_recommendations as your test plan.** It already lists what to mock and which cases to cover.
+4. **Prefer `get_function_context()` over `search()`** when you know the name. It's faster and returns full source code.
+5. **Disambiguate when the name is common.** Pass `class_name` or `file` to avoid getting the wrong function.
+6. **Mark functions after testing.** This persists to the graph so other agents and future runs know what's covered.
 """
+
+
     try:
         with open(guide_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(guide_content)

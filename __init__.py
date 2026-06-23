@@ -22,9 +22,11 @@ from knowledge_base import (
     search,
     run_init,
     run_sync,
+    get_class_context,
+    dump_context_to_file,
 )
 
-__version__ = "1.0.3"
+__version__ = "1.0.6"
 
 __all__ = [
     "configure",
@@ -35,6 +37,8 @@ __all__ = [
     "search",
     "run_init",
     "run_sync",
+    "get_class_context",
+    "dump_context_to_file",
 ]
 
 

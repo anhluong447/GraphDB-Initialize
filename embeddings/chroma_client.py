@@ -67,7 +67,12 @@ def embed_all_nodes():
             text = build_node_text(node, relations_dict)
             batch_ids.append(node_id)
             batch_docs.append(text)
-            batch_metas.append({"type": label, "name": node.get("name", ""), "file": node.get("file", "")})
+            batch_metas.append({
+                "type": label,
+                "name": node.get("name", ""),
+                "file": node.get("file", ""),
+                "is_test": node.get("is_test", False)
+            })
             batch_names.append(node.get("name", ""))
 
             if len(batch_ids) >= 50:
@@ -157,7 +162,12 @@ def embed_nodes_for_files(file_paths: list[str]):
             text = build_node_text(node, relations_dict)
             batch_ids.append(node_id)
             batch_docs.append(text)
-            batch_metas.append({"type": label, "name": node.get("name", ""), "file": node.get("file", "")})
+            batch_metas.append({
+                "type": label,
+                "name": node.get("name", ""),
+                "file": node.get("file", ""),
+                "is_test": node.get("is_test", False)
+            })
 
             if len(batch_ids) >= 50:
                 try:
@@ -182,10 +192,22 @@ def embed_nodes_for_files(file_paths: list[str]):
     print(f"[Chroma] Incrementally embedded {total} nodes for files: {file_paths}")
 
 
-def semantic_search(query: str, top_k: int = 10, filter_type: str = None) -> list[dict]:
+def semantic_search(query: str, top_k: int = 10, filter_type: str = None, exclude_tests: bool = True) -> list[dict]:
     """Find most relevant nodes by cosine similarity."""
     query_vector = embed_text(query)
-    where = {"type": filter_type} if filter_type else None
+    
+    where_clauses = []
+    if filter_type:
+        where_clauses.append({"type": filter_type})
+    if exclude_tests:
+        where_clauses.append({"is_test": {"$ne": True}})
+
+    if len(where_clauses) > 1:
+        where = {"$and": where_clauses}
+    elif len(where_clauses) == 1:
+        where = where_clauses[0]
+    else:
+        where = None
 
     results = collection.query(
         query_embeddings=[query_vector],

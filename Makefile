@@ -1,4 +1,4 @@
-.PHONY: up down init sync status
+.PHONY: up down init sync status hook
 
 up:
 	docker compose up -d
@@ -26,3 +26,7 @@ community:
 
 semantics:
 	python initialize_graph.py --semantics
+
+hook:
+	python updater/git_hook.py
+

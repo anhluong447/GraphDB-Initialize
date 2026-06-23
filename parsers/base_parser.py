@@ -131,6 +131,29 @@ def _extract_nodes(node, source_bytes: bytes, file_path: str, lang: str, result:
         complexity = _compute_complexity(node, source_bytes) if is_func else 0
         decorators = _extract_decorators(node, source_bytes, lang)
 
+        # Extract superclasses for class definitions
+        superclasses = []
+        if not is_func:
+            if lang == "python":
+                arg_list = node.child_by_field_name("superclasses")
+                if arg_list:
+                    for child in arg_list.children:
+                        if child.type in ("identifier", "attribute"):
+                            superclasses.append(source_bytes[child.start_byte:child.end_byte].decode("utf-8", errors="ignore"))
+            elif lang in ("javascript", "typescript"):
+                heritage = None
+                for child in node.children:
+                    if child.type == "class_heritage":
+                        heritage = child
+                        break
+                if heritage:
+                    for child in heritage.children:
+                        text = source_bytes[child.start_byte:child.end_byte].decode("utf-8", errors="ignore")
+                        if text.startswith("extends "):
+                            text = text[8:].strip()
+                        if text:
+                            superclasses.append(text)
+
         result.append({
             "type": node.type,
             "name": name,
@@ -150,6 +173,7 @@ def _extract_nodes(node, source_bytes: bytes, file_path: str, lang: str, result:
             "raises": json.dumps(raises),          # JSON string for Neo4j storage
             "complexity": complexity,
             "annotations": json.dumps(decorators), # JSON string for Neo4j storage
+            "superclasses": json.dumps(superclasses), # JSON string for Neo4j storage
         })
 
         # Track parent class name for methods

@@ -8,7 +8,12 @@ class Neo4jClient:
         self.driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
     def close(self):
-        self.driver.close()
+        global _client
+        try:
+            self.driver.close()
+        except Exception:
+            pass
+        _client = None
 
     def run(self, query: str, params: dict = None, retries=10, delay=3):
         import time

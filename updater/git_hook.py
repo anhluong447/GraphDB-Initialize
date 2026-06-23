@@ -40,7 +40,11 @@ commits = parse_git_history(max_commits=1)
 if commits:
     build_git_nodes(commits)
     print('GraphRAG: Git graph updated.')
-" &
+
+# Close Neo4j client connection
+from graph.neo4j_client import get_client
+get_client().close()
+"
 """
 
 
