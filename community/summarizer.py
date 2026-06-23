@@ -68,6 +68,59 @@ def infer_community_name(community_id: int, summary: str) -> str:
     return response.choices[0].message.content.strip()
 
 
+def _load_community_snapshot() -> dict | None:
+    import json, os
+    from config import GRAPHRAG_DATA_DIR
+    path = os.path.join(GRAPHRAG_DATA_DIR, "community_snapshot_old.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _build_current_snapshot() -> dict:
+    """Query Neo4j for current community membership (post-cluster)."""
+    client = get_client()
+    rows = client.run("""
+        MATCH (n)
+        WHERE n.community_id IS NOT NULL AND n.name IS NOT NULL AND NOT n:Community
+        RETURN n.community_id as cid, n.name as name, n.file as file
+    """)
+    communities = {}
+    for r in rows:
+        cid = str(r["cid"])
+        name = r["name"] or ""
+        file = r["file"] or ""
+        key = f"{name}::{file}"
+        communities.setdefault(cid, []).append(key)
+    
+    # Sort member lists for stable comparison
+    for cid in communities:
+        communities[cid].sort()
+        
+    return {"communities": communities}
+
+
+def _diff_communities(old_snapshot: dict, new_snapshot: dict) -> list[int]:
+    """Return community IDs that changed or are brand new."""
+    old_sets = {frozenset(v) for v in old_snapshot.get("communities", {}).values()}
+    to_summarize = []
+    for cid, members in new_snapshot.get("communities", {}).items():
+        if frozenset(members) not in old_sets:
+            to_summarize.append(int(cid))
+    return to_summarize
+
+
+def _get_old_community_summaries() -> dict:
+    """Query Neo4j for all existing Community nodes: id -> {name, summary}"""
+    client = get_client()
+    rows = client.run("MATCH (c:Community) RETURN c.id as cid, c.name as name, c.summary as summary")
+    return {r["cid"]: {"name": r["name"], "summary": r["summary"]} for r in rows}
+
+
 def summarize_all_communities():
     """Summarize all communities and save to Neo4j and ChromaDB."""
     client = get_client()
@@ -75,6 +128,26 @@ def summarize_all_communities():
     import chromadb
     from config import CHROMA_PATH
     from embeddings.embedder import embed_texts
+
+    # 1. Load old summaries and snapshots
+    old_summaries = _get_old_community_summaries()
+    old_snapshot = _load_community_snapshot()
+    new_snapshot = _build_current_snapshot()
+
+    # 2. Map old member sets to their name/summary
+    set_to_summary = {}
+    if old_snapshot and old_summaries:
+        for old_cid, members in old_snapshot.get("communities", {}).items():
+            try:
+                old_cid_int = int(old_cid)
+            except ValueError:
+                continue
+            if old_cid_int in old_summaries:
+                members_set = frozenset(members)
+                set_to_summary[members_set] = old_summaries[old_cid_int]
+
+    # 3. Clean up existing Community nodes
+    client.run("MATCH (c:Community) DETACH DELETE c")
 
     chroma = chromadb.PersistentClient(path=CHROMA_PATH)
     try:
@@ -91,6 +164,7 @@ def summarize_all_communities():
 
     llm_count = 0
     auto_count = 0
+    reused_count = 0
 
     batch_ids, batch_docs, batch_metas = [], [], []
 
@@ -100,6 +174,12 @@ def summarize_all_communities():
             continue
 
         size = len(members)
+        new_members_list = new_snapshot.get("communities", {}).get(str(cid), [])
+        new_set = frozenset(new_members_list)
+
+        name = None
+        summary = None
+
         if size < 3:
             # Auto summarization for small communities
             if size == 1:
@@ -109,6 +189,11 @@ def summarize_all_communities():
                 name = f"Pair: {members[0]['name']} & {members[1]['name']}"
                 summary = f"Small cluster containing elements: {members[0]['name']} ({members[0]['type']}) and {members[1]['name']} ({members[1]['type']})."
             auto_count += 1
+        elif new_set in set_to_summary and set_to_summary[new_set].get("name") and set_to_summary[new_set].get("summary"):
+            # Reuse existing summary!
+            name = set_to_summary[new_set]["name"]
+            summary = set_to_summary[new_set]["summary"]
+            reused_count += 1
         else:
             # LLM summarization for significant communities
             members_text = "\n".join([f"- [{m['type']}] {m['name']}: {m['description'] or ''}" for m in members[:30]])
@@ -182,6 +267,8 @@ SUMMARY: <your 2-3 sentence summary>"""
 
         if size < 3:
             print(f"  Community {cid} (Auto): '{name}'")
+        elif new_set in set_to_summary and set_to_summary[new_set].get("name") and set_to_summary[new_set].get("summary"):
+            print(f"  Community {cid} (Reused): '{name}'")
         else:
             print(f"  Community {cid} (LLM): '{name}'")
 
@@ -205,4 +292,4 @@ SUMMARY: <your 2-3 sentence summary>"""
         except Exception as e:
             print(f"[Chroma] Error embedding community summaries: {e}")
 
-    print(f"[Community] Summarization done. LLM calls: {llm_count}, Auto: {auto_count}.")
+    print(f"[Community] Summarization done. LLM calls: {llm_count}, Reused: {reused_count}, Auto: {auto_count}.")

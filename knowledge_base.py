@@ -13,6 +13,18 @@ from graph.neo4j_client import get_client
 
 _auto_sync_checked = False
 
+def _assert_configured():
+    import config
+    if not config.CODEBASE_PATH or config.CODEBASE_PATH == "/path/to/your/codebase":
+        raise RuntimeError(
+            "[nelgraph] Chưa configure. Gọi nelgraph.configure() trước:\n"
+            "  import nelgraph\n"
+            "  nelgraph.configure(\n"
+            "      codebase_path='/path/to/project',\n"
+            "      openrouter_api_key='sk-or-...'\n"
+            "  )"
+        )
+
 def _check_and_auto_sync():
     """
     Tự động chạy sync ngầm một lần ở đầu phiên làm việc nếu phát hiện codebase có thay đổi (git status/diff).
@@ -75,6 +87,7 @@ def get_function_context(function_name: str, class_name: str = None, file: str =
             "called_by":    [ {name, file} ],   # functions gọi vào đây
         }
     """
+    _assert_configured()
     _check_and_auto_sync()
     client = get_client()
 
@@ -144,6 +157,7 @@ def get_snapshot(exclude_tests: bool = True) -> dict:
 
     priority_score = complexity*0.3 + in_degree*0.4 + commit_count*0.3
     """
+    _assert_configured()
     _check_and_auto_sync()
     client = get_client()
 
@@ -225,6 +239,7 @@ def get_changes(commit_hash: str) -> dict:
             "risk_level": "low|medium|high"
         }
     """
+    _assert_configured()
     _check_and_auto_sync()
     client = get_client()
 
@@ -264,6 +279,7 @@ def get_class_context(class_name: str) -> dict:
     """
     Lấy thông tin của một Class: các phương thức, docstring, class cha/con, và source code.
     """
+    _assert_configured()
     _check_and_auto_sync()
     client = get_client()
 
@@ -325,6 +341,7 @@ def dump_context_to_file(name: str, path: str, format: str = "markdown") -> bool
     Xuất thông tin của function hoặc class ra file Markdown hoặc JSON.
     Hữu ích cho các agent chạy trên Windows để tránh lỗi encoding CP1252 khi print ra console.
     """
+    _assert_configured()
     # Try class first, then function
     data = get_class_context(name)
     is_class = True
@@ -475,6 +492,7 @@ def mark_tested(function_name: str, file: str = None) -> bool:
 
     Returns: True nếu thành công, False nếu không tìm thấy function.
     """
+    _assert_configured()
     client = get_client()
 
     if file:
@@ -500,6 +518,7 @@ def search(query_text: str, top_k: int = 10, exclude_tests: bool = True) -> list
 
     Returns: list of { name, file, type, score, description }
     """
+    _assert_configured()
     _check_and_auto_sync()
     from embeddings.chroma_client import semantic_search
     return semantic_search(query_text, top_k=top_k, exclude_tests=exclude_tests)
@@ -510,6 +529,7 @@ def run_init(codebase_path: str = None):
     Chạy full initialization pipeline.
     Nếu không truyền path, dùng CODEBASE_PATH trong .env.
     """
+    _assert_configured()
     if codebase_path:
         import os
         os.environ["CODEBASE_PATH"] = codebase_path
@@ -519,5 +539,6 @@ def run_init(codebase_path: str = None):
 
 def run_sync():
     """Chạy incremental sync dựa trên git diff."""
+    _assert_configured()
     from initialize_graph import run_incremental_sync
     run_incremental_sync()

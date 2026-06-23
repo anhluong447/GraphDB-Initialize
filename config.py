@@ -1,10 +1,21 @@
 import os
 from dotenv import load_dotenv
 
-# Load .env from the current working directory first, and fall back to the config directory
-load_dotenv()
+# Load .env files with fallback paths
+load_dotenv(os.path.join(os.getcwd(), ".env"), override=False)
+load_dotenv(os.path.expanduser("~/.nelgraph/.env"), override=False)
+
 config_dir = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(config_dir, ".env"))
+load_dotenv(os.path.join(config_dir, ".env"), override=False)
+
+# Discover from CODEBASE_PATH if set
+codebase_env_path = os.getenv("CODEBASE_PATH")
+if codebase_env_path:
+    if not os.path.isabs(codebase_env_path):
+        codebase_env_path = os.path.abspath(os.path.join(config_dir, codebase_env_path))
+    load_dotenv(os.path.join(codebase_env_path, ".env"), override=False)
+    load_dotenv(os.path.join(codebase_env_path, ".nelgraph.env"), override=False)
+
 
 PROJECT_NAME = os.getenv("PROJECT_NAME", "GraphRAG-Project")
 

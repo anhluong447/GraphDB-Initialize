@@ -98,7 +98,7 @@ def main():
     _auto_update_parent_gitignore()
 
     # Prompt user to verify Docker is running
-    if "--status" not in sys.argv and sys.stdout.isatty():
+    if "--status" not in sys.argv and "--install-hooks" not in sys.argv and sys.stdout.isatty() and not os.environ.get("NELGRAPH_NO_PROMPT"):
         try:
             confirm = input("Bạn đã bật Docker chưa? (y/n) [y]: ").strip().lower()
             if confirm not in ("", "y", "yes"):
@@ -130,7 +130,17 @@ def main():
         "--semantics", action="store_true",
         help="Run LLM semantic extraction (Concepts, Features, Risks, Decisions) on codebase."
     )
+    parser.add_argument(
+        "--install-hooks", action="store_true",
+        help="Install git post-commit and pre-push hooks to CODEBASE_PATH."
+    )
     args = parser.parse_args()
+
+    if args.install_hooks:
+        print("[GitHook] Installing post-commit and pre-push hooks...")
+        from updater.git_hook import install_hook
+        ok = install_hook()
+        sys.exit(0 if ok else 1)
 
     if args.status:
         run_status()

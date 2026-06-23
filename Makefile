@@ -28,5 +28,5 @@ semantics:
 	python initialize_graph.py --semantics
 
 hook:
-	python updater/git_hook.py
+	python initialize_graph.py --install-hooks
 

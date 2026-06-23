@@ -68,7 +68,7 @@ def build_file_nodes(parsed_files: list[dict]):
                 "start_line": node["start_line"],
                 "end_line": node["end_line"],
                 "anchor": node.get("anchor", ""),
-                "raw_code": raw_code[:5000],  # cap at 5000 chars to avoid Neo4j property size limits
+                "raw_code": raw_code[:15000],  # cap at 15000 chars to avoid Neo4j property size limits
                 "visibility": node.get("visibility", "public"),
                 "is_async": node.get("is_async", False),
                 "class_name": node.get("class_name", None),

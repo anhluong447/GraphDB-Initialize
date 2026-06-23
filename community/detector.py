@@ -65,4 +65,57 @@ def detect_communities() -> dict:
             SET n.community_id = $community_id
         """, {"node_id": node_id, "community_id": community_id})
 
+    _save_community_snapshot(result, client)
+
     return result
+
+
+def _save_community_snapshot(result: dict, client):
+    """
+    result: {neo4j_node_id: community_id}
+    Builds {community_id: ["name::file", ...]} and saves to JSON.
+    """
+    import json, time
+    from config import GRAPHRAG_DATA_DIR
+    import os
+
+    rows = client.run("""
+        MATCH (n)
+        WHERE n.community_id IS NOT NULL AND n.name IS NOT NULL AND NOT n:Community
+        RETURN n.community_id as cid, n.name as name, n.file as file
+    """)
+
+    community_members = {}
+    for r in rows:
+        cid = str(r["cid"])
+        name = r["name"] or ""
+        file = r["file"] or ""
+        key = f"{name}::{file}"
+        community_members.setdefault(cid, []).append(key)
+
+    # Sort member lists to ensure stable representation for comparison
+    for cid in community_members:
+        community_members[cid].sort()
+
+    snapshot = {
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "communities": community_members,
+    }
+
+    path = os.path.join(GRAPHRAG_DATA_DIR, "community_snapshot.json")
+    path_old = os.path.join(GRAPHRAG_DATA_DIR, "community_snapshot_old.json")
+    os.makedirs(GRAPHRAG_DATA_DIR, exist_ok=True)
+
+    if os.path.exists(path):
+        try:
+            if os.path.exists(path_old):
+                os.remove(path_old)
+            os.rename(path, path_old)
+        except Exception as e:
+            print(f"[Community] Warning backing up snapshot: {e}")
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(snapshot, f, indent=2)
+
+    print(f"[Community] Snapshot saved: {len(community_members)} communities -> {path}")
+

@@ -27,6 +27,3 @@ leidenalg
 fastapi
 uvicorn
 
-# File Watcher
-watchdog
-

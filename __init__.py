@@ -26,7 +26,7 @@ from knowledge_base import (
     dump_context_to_file,
 )
 
-__version__ = "1.0.6"
+__version__ = "1.0.7"
 
 __all__ = [
     "configure",
@@ -51,6 +51,7 @@ def configure(
     llm_model: str = None,
     embedding_model: str = None,
     embedding_dimensions: int = None,
+    env_file: str = None,
 ):
     """
     Cấu hình graphrag bằng code thay vì .env file.
@@ -65,6 +66,7 @@ def configure(
         llm_model:            Model ID trên OpenRouter cho LLM enrichment.
         embedding_model:      Model ID trên OpenRouter cho embeddings.
         embedding_dimensions: Số chiều vector (default: 512).
+        env_file:             Đường dẫn đến file .env cụ thể.
 
     Ví dụ:
         graphrag.configure(
@@ -74,6 +76,29 @@ def configure(
     """
     import os
     import config as _cfg
+
+    if env_file:
+        from dotenv import load_dotenv
+        load_dotenv(env_file, override=True)
+        if os.getenv("CODEBASE_PATH"):
+            codebase_path = os.getenv("CODEBASE_PATH")
+        if os.getenv("OPENROUTER_API_KEY"):
+            openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        if os.getenv("NEO4J_URI"):
+            neo4j_uri = os.getenv("NEO4J_URI")
+        if os.getenv("NEO4J_PASSWORD"):
+            neo4j_password = os.getenv("NEO4J_PASSWORD")
+        if os.getenv("NEO4J_USER"):
+            neo4j_user = os.getenv("NEO4J_USER")
+        if os.getenv("LLM_MODEL"):
+            llm_model = os.getenv("LLM_MODEL")
+        if os.getenv("EMBEDDING_MODEL"):
+            embedding_model = os.getenv("EMBEDDING_MODEL")
+        if os.getenv("EMBEDDING_DIMENSIONS"):
+            try:
+                embedding_dimensions = int(os.getenv("EMBEDDING_DIMENSIONS"))
+            except ValueError:
+                pass
 
     if codebase_path:
         import os as _os
@@ -120,7 +145,7 @@ def configure(
     # Propagate changes to all imported modules to prevent stale imports
     import sys
     for mod_name, mod in list(sys.modules.items()):
-        if mod and (mod_name.startswith("nelgraph.") or mod_name in ["initialize_graph", "knowledge_base", "core.init_pipeline", "core.sync_pipeline", "graph.builder", "graph.neo4j_client", "embeddings.chroma_client", "embeddings.embedder", "extractors.llm_extractor", "extractors.testing_enricher", "parsers.git_parser", "updater.git_hook", "updater.watcher"]):
+        if mod and (mod_name.startswith("nelgraph.") or mod_name in ["initialize_graph", "knowledge_base", "core.init_pipeline", "core.sync_pipeline", "graph.builder", "graph.neo4j_client", "embeddings.chroma_client", "embeddings.embedder", "extractors.llm_extractor", "extractors.testing_enricher", "parsers.git_parser", "updater.git_hook"]):
             for key in ["CODEBASE_PATH", "GRAPHRAG_DATA_DIR", "NEO4J_DATA_DIR", "NEO4J_LOGS_DIR", "CHROMA_PATH", "SYNC_STATE_PATH", "OPENROUTER_API_KEY", "LLM_MODEL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS", "NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD"]:
                 if hasattr(_cfg, key):
                     val = getattr(_cfg, key)

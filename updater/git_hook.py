@@ -44,6 +44,18 @@ if commits:
 # Close Neo4j client connection
 from graph.neo4j_client import get_client
 get_client().close()
+" &
+"""
+
+HOOK_PRE_PUSH_SCRIPT = """#!/bin/bash
+# nelgraph pre-push hook
+# Sync graph trước khi push để đảm bảo graph up-to-date
+NELGRAPH_PATH="{nelgraph_path}"
+cd "$NELGRAPH_PATH" && python -c "
+from core.sync_pipeline import run_incremental_sync
+run_incremental_sync()
+from graph.neo4j_client import get_client
+get_client().close()
 "
 """
 
@@ -57,6 +69,7 @@ def update_changed_files(changed_files: list[str]):
     from extractors.testing_enricher import enrich_functions_for_files
     
     client = get_client()
+    has_changes = False
     for f in changed_files:
         f = f.replace("\\", "/")
         if not os.path.exists(f):
@@ -68,6 +81,7 @@ def update_changed_files(changed_files: list[str]):
                 collection.delete(where={"file": f})
             except Exception:
                 pass
+            has_changes = True
             continue
 
         print(f"[GitHook] Updating changed file: {f}")
@@ -86,9 +100,17 @@ def update_changed_files(changed_files: list[str]):
             
             # Enrich
             enrich_functions_for_files([f])
+            has_changes = True
+
+    if has_changes:
+        print("[GitHook] Triggering community detection and summarization...")
+        from community.detector import detect_communities
+        from community.summarizer import summarize_all_communities
+        detect_communities()
+        summarize_all_communities()
 
 
-def install_hook():
+def install_post_commit_hook() -> bool:
     """Install post-commit hook in the target codebase."""
     hooks_dir = os.path.join(CODEBASE_PATH, ".git", "hooks")
     if not os.path.exists(hooks_dir):
@@ -107,6 +129,34 @@ def install_hook():
 
     print(f"[GitHook] Post-commit hook installed at {hook_path}")
     return True
+
+
+def install_pre_push_hook() -> bool:
+    """Install pre-push hook in the target codebase."""
+    hooks_dir = os.path.join(CODEBASE_PATH, ".git", "hooks")
+    if not os.path.exists(hooks_dir):
+        print(f"[GitHook] No .git/hooks directory found at {hooks_dir}")
+        return False
+
+    hook_path = os.path.join(hooks_dir, "pre-push")
+    graphrag_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    with open(hook_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(HOOK_PRE_PUSH_SCRIPT.format(nelgraph_path=graphrag_path))
+
+    # Make executable
+    st = os.stat(hook_path)
+    os.chmod(hook_path, st.st_mode | stat.S_IEXEC)
+
+    print(f"[GitHook] Pre-push hook installed at {hook_path}")
+    return True
+
+
+def install_hook() -> bool:
+    """Install both post-commit and pre-push hooks."""
+    ok_post = install_post_commit_hook()
+    ok_push = install_pre_push_hook()
+    return ok_post and ok_push
 
 
 if __name__ == "__main__":

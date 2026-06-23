@@ -271,6 +271,7 @@ def run_full_init():
     })
 
     _generate_agent_query_guide()
+    _copy_agent_skills()
 
     # Automatically install git post-commit hook
     from updater.git_hook import install_hook
@@ -419,3 +420,30 @@ nelgraph.mark_tested("login")  # → True
         print(f"[Init] Generated agent query guide at: {guide_path}")
     except Exception as e:
         print(f"[Init] Warning: Could not generate agent query guide: {e}")
+
+
+def _copy_agent_skills():
+    """Copy the 3 skill files from package skills/ directory to <CODEBASE_PATH>/.agent/"""
+    import shutil
+    dest_dir = os.path.join(CODEBASE_PATH, ".agent")
+    os.makedirs(dest_dir, exist_ok=True)
+    
+    # Source directory inside package
+    package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src_dir = os.path.join(package_root, "skills")
+    
+    # Fallback to updates/skills in the dev repo
+    if not os.path.exists(src_dir) or not os.listdir(src_dir):
+        src_dir = os.path.join(package_root, "updates", "skills")
+        
+    print(f"[Init] Copying agent skills from {src_dir} to {dest_dir}...")
+    if os.path.exists(src_dir):
+        copied_count = 0
+        for f in os.listdir(src_dir):
+            if f.endswith(".md"):
+                shutil.copy2(os.path.join(src_dir, f), os.path.join(dest_dir, f))
+                copied_count += 1
+        print(f"[Init] Copied {copied_count} agent skill files.")
+    else:
+        print(f"[Init] Warning: Agent skills source directory not found: {src_dir}")
+
