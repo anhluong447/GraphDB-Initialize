@@ -6,8 +6,8 @@ print("Python version:", sys.version)
 print("nelgraph version:", nelgraph.__version__)
 print("nelgraph public API:", nelgraph.__all__)
 
-# Assert version is 1.0.6
-assert nelgraph.__version__ == "1.0.6", f"Expected version 1.0.6, got {nelgraph.__version__}"
+# Assert version is 1.0.7
+assert nelgraph.__version__ == "1.0.7", f"Expected version 1.0.7, got {nelgraph.__version__}"
 
 # Assert new functions are in public API
 assert "get_class_context" in nelgraph.__all__, "get_class_context missing from __all__"

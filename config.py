@@ -85,6 +85,9 @@ CHROMA_PATH = CHROMA_PATH.replace("\\", "/")
 # Sync state file for incremental updates
 SYNC_STATE_PATH = os.path.join(GRAPHRAG_DATA_DIR, "sync_state.json").replace("\\", "/")
 
+LOCK_PATH = os.path.join(GRAPHRAG_DATA_DIR, ".nelgraph.lock").replace("\\", "/")
+
+
 # GitHub (optional)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "")  # format: "owner/repo"

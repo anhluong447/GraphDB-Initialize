@@ -26,7 +26,7 @@ from knowledge_base import (
     dump_context_to_file,
 )
 
-__version__ = "1.0.7"
+__version__ = "1.0.8"
 
 __all__ = [
     "configure",

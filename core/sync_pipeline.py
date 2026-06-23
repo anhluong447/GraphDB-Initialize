@@ -95,125 +95,133 @@ def run_incremental_sync():
         return
     last_commit = sync_state["last_synced_commit"]
 
-    print("=" * 60)
-    print("GraphRAG — Incremental Sync")
-    print("=" * 60)
-    print(f"Target codebase : {CODEBASE_PATH}")
-    print(f"Last synced     : {sync_state.get('last_sync_time', 'unknown')}")
-    print(f"Last commit     : {last_commit[:8] if last_commit else 'N/A'}")
-
-    # Ensure Docker is running
-    print("\n[1/6] Ensuring databases are running...")
-    _start_docker()
-
-    # Compute diff
-    print("\n[2/6] Computing git diff...")
-    changes = _get_changed_files(CODEBASE_PATH, last_commit)
-
-    modified_files = changes["modified"]
-    deleted_files = changes["deleted"]
-
-    if not modified_files and not deleted_files:
-        print("\n✅ No changes detected. Graph is up to date.")
+    from core.lock import acquire_lock, release_lock
+    if not acquire_lock("incremental_sync"):
+        print("[Sync] Another sync/hook is running. Skipping to avoid conflict.")
         return
 
-    print(f"  Modified/Added : {len(modified_files)} files")
-    print(f"  Deleted        : {len(deleted_files)} files")
-    for f in modified_files[:10]:
-        print(f"    + {os.path.basename(f)}")
-    for f in deleted_files[:10]:
-        print(f"    - {os.path.basename(f)}")
+    try:
+        print("=" * 60)
+        print("GraphRAG — Incremental Sync")
+        print("=" * 60)
+        print(f"Target codebase : {CODEBASE_PATH}")
+        print(f"Last synced     : {sync_state.get('last_sync_time', 'unknown')}")
+        print(f"Last commit     : {last_commit[:8] if last_commit else 'N/A'}")
 
-    from graph.neo4j_client import get_client
-    client = get_client()
+        # Compute diff first
+        print("\n[1/6] Computing git diff...")
+        changes = _get_changed_files(CODEBASE_PATH, last_commit)
 
-    # Clean up deleted files
-    print("\n[3/6] Cleaning up deleted/modified nodes...")
-    all_affected_files = deleted_files + modified_files
-    for file_path in all_affected_files:
-        # Delete Function and Class nodes belonging to this file
-        client.run("""
-            MATCH (n) WHERE n.file = $file AND (n:Function OR n:Class)
-            DETACH DELETE n
-        """, {"file": file_path})
-        # Delete File node for deleted files
-        if file_path in deleted_files:
-            client.run("MATCH (f:File {path: $path}) DETACH DELETE f", {"path": file_path})
+        modified_files = changes["modified"]
+        deleted_files = changes["deleted"]
 
-    # Clean up ChromaDB embeddings for affected files
-    from embeddings.chroma_client import collection
-    for file_path in all_affected_files:
+        if not modified_files and not deleted_files:
+            print("\n✅ No changes detected. Graph is up to date.")
+            return
+
+        print(f"  Modified/Added : {len(modified_files)} files")
+        print(f"  Deleted        : {len(deleted_files)} files")
+        for f in modified_files[:10]:
+            print(f"    + {os.path.basename(f)}")
+        for f in deleted_files[:10]:
+            print(f"    - {os.path.basename(f)}")
+
+        # Ensure Docker is running
+        print("\n[2/6] Ensuring databases are running...")
+        _start_docker()
+
+        from graph.neo4j_client import get_client
+        client = get_client()
+
+        # Clean up deleted files
+        print("\n[3/6] Cleaning up deleted/modified nodes...")
+        all_affected_files = deleted_files + modified_files
+        for file_path in all_affected_files:
+            # Delete Function and Class nodes belonging to this file
+            client.run("""
+                MATCH (n) WHERE n.file = $file AND (n:Function OR n:Class)
+                DETACH DELETE n
+            """, {"file": file_path})
+            # Delete File node for deleted files
+            if file_path in deleted_files:
+                client.run("MATCH (f:File {path: $path}) DETACH DELETE f", {"path": file_path})
+
+        # Clean up ChromaDB embeddings for affected files
+        from embeddings.chroma_client import collection
+        for file_path in all_affected_files:
+            try:
+                collection.delete(where={"file": file_path})
+            except Exception:
+                pass
+
+        # Re-parse and rebuild modified files
+        print("\n[4/6] Re-parsing and rebuilding modified files...")
+        if modified_files:
+            from parsers.ast_parser import parse_file
+            from graph.builder import build_file_nodes
+
+            parsed = [parse_file(f) for f in modified_files]
+            parsed = [p for p in parsed if p is not None]
+
+            if parsed:
+                build_file_nodes(parsed)
+
+                # Embed the new/modified nodes
+                from embeddings.chroma_client import embed_nodes_for_files
+                changed_file_paths = [p["file"] for p in parsed]
+                embed_nodes_for_files(changed_file_paths)
+
+                # Enrich new/modified functions with AI test specs
+                print("\n[5/6] Enriching modified functions with AI test specs...")
+                from extractors.testing_enricher import enrich_functions_for_files
+                enrich_functions_for_files(changed_file_paths)
+            else:
+                print("  No parseable files found among modifications.")
+
+        # Update git history for new commits
+        from parsers.git_parser import parse_git_history
+        from graph.builder import build_git_nodes
+        new_commits = parse_git_history(CODEBASE_PATH, max_commits=50)
+        if new_commits:
+            build_git_nodes(new_commits)
+
+        # Re-run community detection
+        print("\n[6/6] Updating community clusters...")
+        from community.detector import detect_communities
+        from community.summarizer import summarize_all_communities
+        detect_communities()
+        summarize_all_communities()
+
+        # 6b. Link new commits to functions
+        if new_commits and modified_files:
+            from graph.builder import link_commits_to_functions
+            # Build parsed info for linking
+            from parsers.ast_parser import parse_file
+            link_parsed = [p for p in [parse_file(f) for f in modified_files] if p] if modified_files else []
+            if link_parsed:
+                link_commits_to_functions(new_commits[:10], link_parsed, CODEBASE_PATH)
+
+        # Update sync state
+        head = _get_head_commit(CODEBASE_PATH)
+        _save_sync_state({
+            "last_synced_commit": head,
+            "last_sync_time": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "codebase_path": CODEBASE_PATH,
+            "mode": "incremental_sync",
+            "files_modified": len(modified_files),
+            "files_deleted": len(deleted_files),
+        })
+
+        print("\n" + "=" * 60)
+        print("✅ Incremental sync complete!")
+        print("=" * 60)
+        print(f"   Modified: {len(modified_files)} | Deleted: {len(deleted_files)}")
+
+        # Close Neo4j client connection
         try:
-            collection.delete(where={"file": file_path})
+            from graph.neo4j_client import get_client
+            get_client().close()
         except Exception:
             pass
-
-    # Re-parse and rebuild modified files
-    print("\n[4/6] Re-parsing and rebuilding modified files...")
-    if modified_files:
-        from parsers.ast_parser import parse_file
-        from graph.builder import build_file_nodes
-
-        parsed = [parse_file(f) for f in modified_files]
-        parsed = [p for p in parsed if p is not None]
-
-        if parsed:
-            build_file_nodes(parsed)
-
-            # Embed the new/modified nodes
-            from embeddings.chroma_client import embed_nodes_for_files
-            changed_file_paths = [p["file"] for p in parsed]
-            embed_nodes_for_files(changed_file_paths)
-
-            # Enrich new/modified functions with AI test specs
-            print("\n[5/6] Enriching modified functions with AI test specs...")
-            from extractors.testing_enricher import enrich_functions_for_files
-            enrich_functions_for_files(changed_file_paths)
-        else:
-            print("  No parseable files found among modifications.")
-
-    # Update git history for new commits
-    from parsers.git_parser import parse_git_history
-    from graph.builder import build_git_nodes
-    new_commits = parse_git_history(CODEBASE_PATH, max_commits=50)
-    if new_commits:
-        build_git_nodes(new_commits)
-
-    # Re-run community detection
-    print("\n[6/6] Updating community clusters...")
-    from community.detector import detect_communities
-    from community.summarizer import summarize_all_communities
-    detect_communities()
-    summarize_all_communities()
-
-    # 6b. Link new commits to functions
-    if new_commits and modified_files:
-        from graph.builder import link_commits_to_functions
-        # Build parsed info for linking
-        from parsers.ast_parser import parse_file
-        link_parsed = [p for p in [parse_file(f) for f in modified_files] if p] if modified_files else []
-        if link_parsed:
-            link_commits_to_functions(new_commits[:10], link_parsed, CODEBASE_PATH)
-
-    # Update sync state
-    head = _get_head_commit(CODEBASE_PATH)
-    _save_sync_state({
-        "last_synced_commit": head,
-        "last_sync_time": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "codebase_path": CODEBASE_PATH,
-        "mode": "incremental_sync",
-        "files_modified": len(modified_files),
-        "files_deleted": len(deleted_files),
-    })
-
-    print("\n" + "=" * 60)
-    print("✅ Incremental sync complete!")
-    print("=" * 60)
-    print(f"   Modified: {len(modified_files)} | Deleted: {len(deleted_files)}")
-
-    # Close Neo4j client connection
-    try:
-        from graph.neo4j_client import get_client
-        get_client().close()
-    except Exception:
-        pass
+    finally:
+        release_lock()

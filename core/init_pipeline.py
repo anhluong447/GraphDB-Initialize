@@ -294,7 +294,7 @@ def run_full_init():
 
 
 def _generate_agent_query_guide():
-    agent_dir = os.path.join(CODEBASE_PATH, ".agents", "nelgraph")
+    agent_dir = os.path.join(CODEBASE_PATH, ".agent", "nelgraph")
     os.makedirs(agent_dir, exist_ok=True)
     guide_path = os.path.join(agent_dir, "SKILL.md")
     
@@ -423,9 +423,9 @@ nelgraph.mark_tested("login")  # → True
 
 
 def _copy_agent_skills():
-    """Copy the 3 skill files from package skills/ directory to <CODEBASE_PATH>/.agent/"""
+    """Copy the 3 skill files from package skills/ directory to <CODEBASE_PATH>/.agent/nelgraph/"""
     import shutil
-    dest_dir = os.path.join(CODEBASE_PATH, ".agent")
+    dest_dir = os.path.join(CODEBASE_PATH, ".agent", "nelgraph")
     os.makedirs(dest_dir, exist_ok=True)
     
     # Source directory inside package
@@ -446,4 +446,24 @@ def _copy_agent_skills():
         print(f"[Init] Copied {copied_count} agent skill files.")
     else:
         print(f"[Init] Warning: Agent skills source directory not found: {src_dir}")
+
+    # Cleanup redundant / old paths if they exist
+    # 1. Old .agents directory
+    old_agents_dir = os.path.join(CODEBASE_PATH, ".agents")
+    if os.path.exists(old_agents_dir):
+        try:
+            shutil.rmtree(old_agents_dir)
+            print(f"[Init] Cleaned up legacy directory {old_agents_dir}")
+        except Exception:
+            pass
+            
+    # 2. Old loose files in .agent/
+    for f in ["nelgraph-community.md", "nelgraph-query.md", "nelgraph-sync.md"]:
+        old_file = os.path.join(CODEBASE_PATH, ".agent", f)
+        if os.path.exists(old_file):
+            try:
+                os.remove(old_file)
+                print(f"[Init] Cleaned up legacy file {old_file}")
+            except Exception:
+                pass
 

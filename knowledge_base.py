@@ -487,7 +487,7 @@ def dump_context_to_file(name: str, path: str, format: str = "markdown") -> bool
 
 def mark_tested(function_name: str, file: str = None) -> bool:
     """
-    Đánh dấu function đã có test (has_test = true).
+    Đánh dấu function đã có test (has_test = true và tested = true).
     Gọi sau khi gen test xong và test pass.
 
     Returns: True nếu thành công, False nếu không tìm thấy function.
@@ -497,18 +497,23 @@ def mark_tested(function_name: str, file: str = None) -> bool:
 
     if file:
         result = client.run("""
-            MATCH (f:Function {name: $name, file: $file})
-            SET f.has_test = true
+            MATCH (f:Function)
+            WHERE f.name = $name AND f.file = $file
+            SET f.tested = true, f.has_test = true
             RETURN f.name
         """, {"name": function_name, "file": file})
     else:
         result = client.run("""
-            MATCH (f:Function {name: $name})
-            SET f.has_test = true
+            MATCH (f:Function)
+            WHERE f.name = $name
+            SET f.tested = true, f.has_test = true
             RETURN f.name
         """, {"name": function_name})
 
-    return len(result) > 0
+    if not result:
+        print(f"[Warning] mark_tested: function '{function_name}' not found in graph")
+        return False
+    return True
 
 
 def search(query_text: str, top_k: int = 10, exclude_tests: bool = True) -> list[dict]:

@@ -90,19 +90,41 @@ def build_file_nodes(parsed_files: list[dict]):
             """, {"file_path": node["file"], "name": node["name"]})
 
             # INHERITS_FROM edges for Class inheritance
+            # External base classes (Exception, unittest.TestCase, etc.) are stored as
+            # ExternalClass nodes — NOT as bare Class nodes — to avoid junk nodes without file paths.
             if base_label == "Class" and node.get("superclasses"):
                 try:
                     superclasses = json.loads(node["superclasses"]) if isinstance(node["superclasses"], str) else node["superclasses"]
                     for base in superclasses:
-                        client.run("""
-                            MATCH (child:Class {name: $child_name, file: $file})
-                            MERGE (parent:Class {name: $parent_name})
-                            MERGE (child)-[:INHERITS_FROM]->(parent)
-                        """, {
-                            "child_name": node["name"],
-                            "file": node["file"],
-                            "parent_name": base
-                        })
+                        # Check if this base class exists in the graph as a real Class node (has file)
+                        existing = client.run("""
+                            MATCH (c:Class {name: $parent_name})
+                            WHERE c.file IS NOT NULL
+                            RETURN c.name LIMIT 1
+                        """, {"parent_name": base})
+                        if existing:
+                            # Link to existing Class node
+                            client.run("""
+                                MATCH (child:Class {name: $child_name, file: $file})
+                                MATCH (parent:Class {name: $parent_name})
+                                WHERE parent.file IS NOT NULL
+                                MERGE (child)-[:INHERITS_FROM]->(parent)
+                            """, {
+                                "child_name": node["name"],
+                                "file": node["file"],
+                                "parent_name": base
+                            })
+                        else:
+                            # External/stdlib base: use ExternalClass label so it won't be treated as junk
+                            client.run("""
+                                MATCH (child:Class {name: $child_name, file: $file})
+                                MERGE (parent:ExternalClass {name: $parent_name})
+                                MERGE (child)-[:INHERITS_FROM]->(parent)
+                            """, {
+                                "child_name": node["name"],
+                                "file": node["file"],
+                                "parent_name": base
+                            })
                 except Exception:
                     pass
 

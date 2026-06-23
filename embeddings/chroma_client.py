@@ -67,11 +67,18 @@ def embed_all_nodes():
             text = build_node_text(node, relations_dict)
             batch_ids.append(node_id)
             batch_docs.append(text)
+            node_name_lower = node.get("name", "").lower()
+            is_test_node = node.get("is_test", False)
+            # Tag semantic nodes (Concept/Feature/etc.) as test if name suggests so
+            if not is_test_node and label not in ("Function", "Class"):
+                is_test_keywords = ["test", "unittest", "mock", "fixture"]
+                if any(kw in node_name_lower for kw in is_test_keywords):
+                    is_test_node = True
             batch_metas.append({
                 "type": label,
                 "name": node.get("name", ""),
                 "file": node.get("file", ""),
-                "is_test": node.get("is_test", False)
+                "is_test": is_test_node
             })
             batch_names.append(node.get("name", ""))
 
@@ -232,8 +239,18 @@ def semantic_search(query: str, top_k: int = 10, filter_type: str = None, exclud
             except Exception as e:
                 print(f"[Chroma] Warning: failed to fetch node descriptions from Neo4j: {e}")
 
+        _test_keywords = {"test", "unittest", "mock", "fixture"}
         for i in range(len(results["ids"][0])):
             meta = results["metadatas"][0][i]
+            # Post-filter: skip test-related nodes when exclude_tests is True.
+            # This handles semantic nodes (Concept/Feature/Task) whose is_test flag
+            # may not have been set correctly at embedding time.
+            if exclude_tests:
+                if meta.get("is_test", False):
+                    continue
+                name_lower = meta.get("name", "").lower()
+                if any(kw in name_lower for kw in _test_keywords):
+                    continue
             name = meta.get("name", "")
             output.append({
                 "id": results["ids"][0][i],
