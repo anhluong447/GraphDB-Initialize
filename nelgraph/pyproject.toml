@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nelgraph"
+version = "1.0.9"
+description = "GraphRAG knowledge base for codebases"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "tree-sitter",
+    "tree-sitter-python",
+    "tree-sitter-javascript",
+    "tree-sitter-typescript",
+    "tree-sitter-php",
+    "gitpython",
+    "requests",
+    "python-dotenv",
+    "openai",
+    "json-repair",
+    "neo4j",
+    "chromadb",
+    "networkx",
+    "igraph",
+    "leidenalg",
+    "click",
+    "rich",
+    "fastapi",
+    "uvicorn"
+]
+
+[project.scripts]
+nelgraph = "nelgraph.cli:main"
+
+[tool.hatch.build]
+ignore-vcs = true
+include = [
+  "nelgraph/**/*",
+]
+exclude = [
+  "**/node_modules",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["nelgraph"]
+
+[tool.hatch.build.targets.sdist]
+include = ["nelgraph"]
+
+
+

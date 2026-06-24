@@ -1,0 +1,74 @@
+/* ── NelGraph Dashboard V2 — Design Token System ─────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=JetBrains+Mono:wght@400&display=swap');
+
+:root {
+  /* ── Background ── */
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #f8f8f7;
+  --color-background-tertiary: #f1efe8;
+
+  /* ── Text ── */
+  --color-text-primary: #1d1c1a;
+  --color-text-secondary: #6b6965;
+  --color-text-tertiary: #9c9a94;
+
+  /* ── Border ── */
+  --color-border-primary: #e5e4e0;
+  --color-border-secondary: #d4d3cf;
+  --color-border-tertiary: rgba(0,0,0,0.08);
+
+  /* ── Accent ── */
+  --color-accent: #378ADD;
+  --color-accent-muted: rgba(55,138,221,0.08);
+  --color-danger: #dc2626;
+  --color-danger-muted: #fef2f2;
+  --color-success: #16a34a;
+  --color-success-muted: #f0fdf4;
+  --color-warning: #d97706;
+  --color-warning-muted: #fffbeb;
+
+  /* ── Typography ── */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+
+  /* ── Spacing (4px grid) ── */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px;
+
+  /* ── Radius ── */
+  --radius-sm: 2px; --radius-md: 4px; --radius-lg: 6px; --radius-xl: 8px;
+
+  /* ── Community palette (6 colors, cycle) ── */
+  --community-0: #378ADD; --community-1: #7F77DD; --community-2: #1D9E75;
+  --community-3: #D85A30; --community-4: #BA7517; --community-5: #888780;
+
+  /* ── Node type badge ── */
+  --badge-function-bg: #E6F1FB; --badge-function-color: #0C447C;
+  --badge-class-bg: #EEEDFE; --badge-class-color: #3C3489;
+  --badge-community-bg: #E1F5EE; --badge-community-color: #085041;
+  --badge-file-bg: #F1EFE8; --badge-file-color: #444441;
+  --badge-commit-bg: #F1EFE8; --badge-commit-color: #444441;
+  --badge-tested-bg: #EAF3DE; --badge-tested-color: #27500A;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%; width: 100%; overflow: hidden;
+  font-family: var(--font-sans);
+  font-size: 13px; line-height: 1.5;
+  color: var(--color-text-primary);
+  background: var(--color-background-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border-secondary); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-tertiary); }
+
+/* ── Animations ── */
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

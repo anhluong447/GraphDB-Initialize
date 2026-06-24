@@ -1,4 +1,4 @@
-.PHONY: up down init sync status hook
+.PHONY: up down init sync status hook viz
 
 up:
 	docker compose up -d
@@ -30,3 +30,5 @@ semantics:
 hook:
 	python initialize_graph.py --install-hooks
 
+viz:
+	python initialize_graph.py --viz

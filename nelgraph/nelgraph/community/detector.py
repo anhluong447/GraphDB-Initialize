@@ -1,0 +1,121 @@
+import networkx as nx
+import igraph as ig
+import leidenalg
+from nelgraph.graph.neo4j_client import get_client
+
+
+def build_networkx_graph() -> nx.Graph:
+    """Convert Neo4j graph to NetworkX graph for algorithms."""
+    client = get_client()
+
+    G = nx.Graph()
+
+    # Get all nodes
+    nodes = client.run("MATCH (n) WHERE n.name IS NOT NULL RETURN elementId(n) as id, labels(n) as labels, n.name as name")
+    for record in nodes:
+        G.add_node(record["id"], name=record["name"], label=record["labels"][0] if record["labels"] else "Unknown")
+
+    # Get all edges
+    edges = client.run("MATCH (a)-[r]->(b) WHERE a.name IS NOT NULL AND b.name IS NOT NULL RETURN elementId(a) as from_id, elementId(b) as to_id, type(r) as rel_type")
+    for record in edges:
+        G.add_edge(record["from_id"], record["to_id"], rel_type=record["rel_type"])
+
+    print(f"[Community] NetworkX graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+    return G
+
+
+def detect_communities() -> dict:
+    """
+    Run Leiden algorithm via igraph/leidenalg.
+    Returns mapping node_id -> community_id.
+    Saves community_id to Neo4j nodes.
+    """
+    G = build_networkx_graph()
+    if G.number_of_nodes() == 0:
+        print("[Community] Empty graph, skipping community detection.")
+        return {}
+
+    # Convert NetworkX to igraph
+    nx_nodes = list(G.nodes())
+    node_id_map = {n: i for i, n in enumerate(nx_nodes)}
+
+    ig_graph = ig.Graph()
+    ig_graph.add_vertices(len(nx_nodes))
+
+    for u, v in G.edges():
+        ig_graph.add_edge(node_id_map[u], node_id_map[v])
+
+    # Run Leiden algorithm
+    partition = leidenalg.find_partition(ig_graph, leidenalg.ModularityVertexPartition)
+
+    # Build result mapping: neo4j_node_id -> community_id
+    result = {}
+    for community_id, members in enumerate(partition):
+        for member_idx in members:
+            neo4j_id = nx_nodes[member_idx]
+            result[neo4j_id] = community_id
+
+    print(f"[Community] Detected {len(partition)} communities.")
+
+    # Save community IDs to Neo4j
+    client = get_client()
+    for node_id, community_id in result.items():
+        client.run("""
+            MATCH (n) WHERE elementId(n) = $node_id
+            SET n.community_id = $community_id
+        """, {"node_id": node_id, "community_id": community_id})
+
+    _save_community_snapshot(result, client)
+
+    return result
+
+
+def _save_community_snapshot(result: dict, client):
+    """
+    result: {neo4j_node_id: community_id}
+    Builds {community_id: ["name::file", ...]} and saves to JSON.
+    """
+    import json, time
+    from nelgraph.config import GRAPHRAG_DATA_DIR
+    import os
+
+    rows = client.run("""
+        MATCH (n)
+        WHERE n.community_id IS NOT NULL AND n.name IS NOT NULL AND NOT n:Community
+        RETURN n.community_id as cid, n.name as name, n.file as file
+    """)
+
+    community_members = {}
+    for r in rows:
+        cid = str(r["cid"])
+        name = r["name"] or ""
+        file = r["file"] or ""
+        key = f"{name}::{file}"
+        community_members.setdefault(cid, []).append(key)
+
+    # Sort member lists to ensure stable representation for comparison
+    for cid in community_members:
+        community_members[cid].sort()
+
+    snapshot = {
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "communities": community_members,
+    }
+
+    path = os.path.join(GRAPHRAG_DATA_DIR, "community_snapshot.json")
+    path_old = os.path.join(GRAPHRAG_DATA_DIR, "community_snapshot_old.json")
+    os.makedirs(GRAPHRAG_DATA_DIR, exist_ok=True)
+
+    if os.path.exists(path):
+        try:
+            if os.path.exists(path_old):
+                os.remove(path_old)
+            os.rename(path, path_old)
+        except Exception as e:
+            print(f"[Community] Warning backing up snapshot: {e}")
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(snapshot, f, indent=2)
+
+    print(f"[Community] Snapshot saved: {len(community_members)} communities -> {path}")
+

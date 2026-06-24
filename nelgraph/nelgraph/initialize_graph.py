@@ -21,16 +21,16 @@ if sys.platform.startswith("win"):
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import CODEBASE_PATH, GRAPHRAG_DATA_DIR
+from nelgraph.config import CODEBASE_PATH, GRAPHRAG_DATA_DIR
 
 # --- Backwards compatibility imports & exports ---
-from core.init_pipeline import (
+from nelgraph.core.init_pipeline import (
     run_full_init,
     _start_docker,
     _load_sync_state,
     _auto_update_parent_gitignore,
 )
-from core.sync_pipeline import run_incremental_sync
+from nelgraph.core.sync_pipeline import run_incremental_sync
 
 __all__ = [
     "run_full_init",
@@ -59,7 +59,7 @@ def run_status():
 
     try:
         _start_docker()
-        from graph.neo4j_client import get_client
+        from nelgraph.graph.neo4j_client import get_client
         client = get_client()
 
         stats_list = client.run("""
@@ -142,9 +142,13 @@ def main():
 
     if args.install_hooks:
         print("[GitHook] Installing post-commit and pre-push hooks...")
-        from updater.git_hook import install_hook
+        from nelgraph.updater.git_hook import install_hook
         ok = install_hook()
         sys.exit(0 if ok else 1)
+
+    if args.viz:
+        run_viz()
+        return
 
     if args.status:
         run_status()
@@ -153,15 +157,15 @@ def main():
     if args.enrich:
         print("[Enrich] Starting AI enrichment for remaining functions...")
         _start_docker()
-        from extractors.testing_enricher import enrich_all_functions
+        from nelgraph.extractors.testing_enricher import enrich_all_functions
         enrich_all_functions()
         return
 
     if args.community:
         print("[Community] Starting community detection and summarization...")
         _start_docker()
-        from community.detector import detect_communities
-        from community.summarizer import summarize_all_communities
+        from nelgraph.community.detector import detect_communities
+        from nelgraph.community.summarizer import summarize_all_communities
         detect_communities()
         summarize_all_communities()
         return
@@ -169,19 +173,14 @@ def main():
     if args.semantics:
         print("[Semantics] Starting LLM semantic extraction...")
         _start_docker()
-        from core.init_pipeline import step_parse_codebase, step_extract_semantics
+        from nelgraph.core.init_pipeline import step_parse_codebase, step_extract_semantics
         parsed_data = step_parse_codebase(CODEBASE_PATH)
         step_extract_semantics(parsed_data["parsed_files"], parsed_data["docs"])
         print("[Semantics] Re-running community detection to include new semantic nodes...")
-        from community.detector import detect_communities
-        from community.summarizer import summarize_all_communities
+        from nelgraph.community.detector import detect_communities
+        from nelgraph.community.summarizer import summarize_all_communities
         detect_communities()
         summarize_all_communities()
-        return
-
-    if args.viz:
-        from nelgraph.initialize_graph import run_viz
-        run_viz()
         return
 
     sync_state = _load_sync_state()
@@ -190,11 +189,47 @@ def main():
         if sync_state and args.force_init:
             print("[Init] Force re-initialization requested. Clearing existing graph...")
             _start_docker()
-            from graph.neo4j_client import get_client
+            from nelgraph.graph.neo4j_client import get_client
             get_client().clear_all()
         run_full_init()
     else:
         run_incremental_sync()
+
+
+def run_viz():
+    """Launch the NelGraph Dashboard: build frontend + start API server."""
+    import subprocess
+    import webbrowser
+    import uvicorn
+    import nelgraph
+
+    # Find the nelgraph package directory dynamically
+    nelgraph_dir = os.path.dirname(os.path.abspath(nelgraph.__file__))
+    frontend_path = os.path.join(nelgraph_dir, "visualization", "frontend")
+    dist_path = os.path.join(frontend_path, "dist")
+
+    # 1. Check npm
+    try:
+        subprocess.run(["npm", "--version"], capture_output=True, check=True, shell=True)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        print("[Viz] Error: npm not found. Please install Node.js from https://nodejs.org/")
+        sys.exit(1)
+
+    # 2. Build frontend if dist/ doesn't exist
+    if not os.path.isdir(dist_path):
+        print("[Viz] Building frontend...")
+        subprocess.run(["npm", "install"], cwd=frontend_path, check=True, shell=True)
+        subprocess.run(["npm", "run", "build"], cwd=frontend_path, check=True, shell=True)
+        print("[Viz] Frontend built successfully.")
+
+    # 3. Start Docker (Neo4j)
+    _start_docker()
+
+    # 4. Start uvicorn
+    print("[Viz] Dashboard running at http://localhost:8080")
+    webbrowser.open("http://localhost:8080")
+
+    uvicorn.run("nelgraph.visualization.backend.api:app", host="0.0.0.0", port=8080, reload=False)
 
 
 if __name__ == "__main__":
