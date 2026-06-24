@@ -526,7 +526,19 @@ def search(query_text: str, top_k: int = 10, exclude_tests: bool = True) -> list
     _assert_configured()
     _check_and_auto_sync()
     from nelgraph.embeddings.chroma_client import semantic_search
-    return semantic_search(query_text, top_k=top_k, exclude_tests=exclude_tests)
+    raw_results = semantic_search(query_text, top_k=top_k, exclude_tests=exclude_tests)
+    
+    formatted = []
+    for r in raw_results:
+        meta = r.get("metadata", {})
+        formatted.append({
+            "name": meta.get("name", ""),
+            "file": meta.get("file", ""),
+            "type": meta.get("type", ""),
+            "score": r.get("score", 0.0),
+            "description": r.get("document", ""),
+        })
+    return formatted
 
 
 def run_init(codebase_path: str = None):

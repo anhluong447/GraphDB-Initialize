@@ -258,9 +258,25 @@ class TestAgent:
 
             # Try function context first
             ctx = kb.get_function_context(self.target, class_name=self.class_name, file=self.file)
-            if ctx and ctx.get("raw_code"):
-                self.log(f"Found function '{self.target}' in {ctx.get('file', '?')}")
-                return {"type": "function", "primary": ctx}
+            if ctx and ctx.get("function"):
+                func_info = ctx["function"]
+                self.log(f"Found function '{self.target}' in {func_info.get('file', '?')}")
+                primary = {
+                    "name": func_info.get("name"),
+                    "file": func_info.get("file"),
+                    "class_name": func_info.get("class_name"),
+                    "complexity": func_info.get("complexity"),
+                    "is_async": func_info.get("is_async"),
+                    "inputs": func_info.get("inputs"),
+                    "output": func_info.get("output"),
+                    "raises": func_info.get("raises"),
+                    "edge_cases": func_info.get("edge_cases"),
+                    "test_recommendations": func_info.get("test_recommendations"),
+                    "raw_code": func_info.get("source_code") or func_info.get("raw_code"),
+                    "callers": ctx.get("called_by", []),
+                    "callees": ctx.get("calls_outside", []),
+                }
+                return {"type": "function", "primary": primary}
 
             # Try class context
             ctx = kb.get_class_context(self.target)
@@ -275,8 +291,24 @@ class TestAgent:
                 contexts = []
                 for r in results[:3]:
                     c = kb.get_function_context(r["name"], file=r.get("file"))
-                    if c and c.get("raw_code"):
-                        contexts.append(c)
+                    if c and c.get("function"):
+                        func_info = c["function"]
+                        primary = {
+                            "name": func_info.get("name"),
+                            "file": func_info.get("file"),
+                            "class_name": func_info.get("class_name"),
+                            "complexity": func_info.get("complexity"),
+                            "is_async": func_info.get("is_async"),
+                            "inputs": func_info.get("inputs"),
+                            "output": func_info.get("output"),
+                            "raises": func_info.get("raises"),
+                            "edge_cases": func_info.get("edge_cases"),
+                            "test_recommendations": func_info.get("test_recommendations"),
+                            "raw_code": func_info.get("source_code") or func_info.get("raw_code"),
+                            "callers": c.get("called_by", []),
+                            "callees": c.get("calls_outside", []),
+                        }
+                        contexts.append(primary)
                 if contexts:
                     return {"type": "search", "primary": contexts[0], "related": contexts[1:]}
 
