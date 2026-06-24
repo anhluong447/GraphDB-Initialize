@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import axios from 'axios'
+import { forceCollide } from 'd3-force'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
@@ -35,6 +36,31 @@ export default function GraphView({ graphData, graphLoading, stats, onNodeClick,
     }, 300)
     return () => clearTimeout(debounceRef.current)
   }, [searchQuery, setHighlightNodes])
+
+  // Tune D3 force simulation parameters to optimize layout and spacing
+  useEffect(() => {
+    if (graphRef.current) {
+      const fg = graphRef.current
+      
+      // 1. Stronger repulsion up close, but ignore distant nodes to avoid ring formation
+      fg.d3Force('charge')
+        .strength(-250)
+        .distanceMax(250)
+      
+      // 2. Spread out linked nodes
+      fg.d3Force('link')
+        .distance(80)
+      
+      // 3. Collision force to prevent node overlaps
+      fg.d3Force('collide', forceCollide(node => {
+        const size = NODE_SIZES[node.type] || 5
+        return size + 14
+      }))
+      
+      // Reheat simulation to apply the modified forces
+      fg.d3ReheatSimulation()
+    }
+  }, [graphLoading])
 
   const filteredNodes = activeFilter === 'All'
     ? graphData.nodes
