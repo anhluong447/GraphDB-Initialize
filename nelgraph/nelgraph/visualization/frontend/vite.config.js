@@ -19,4 +19,9 @@ export default defineConfig({
       '/owner': 'http://localhost:8080',
     },
   },
+  test: {
+    environment: 'jsdom',
+    setupFiles: './src/setupTests.js',
+    globals: true,
+  },
 })
