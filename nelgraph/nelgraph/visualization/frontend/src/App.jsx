@@ -7,6 +7,7 @@ import FunctionsView from './components/FunctionsView'
 import TestCoverageView from './components/TestCoverageView'
 import CommitsView from './components/CommitsView'
 import DetailPanel from './components/DetailPanel'
+import ErrorBoundary from './components/ErrorBoundary'
 import { useStatus } from './hooks/useStatus'
 import { useGraph } from './hooks/useGraph'
 import { useNodeDetail } from './hooks/useNodeDetail'
@@ -109,15 +110,17 @@ export default function App() {
         {renderView()}
       </div>
       {selectedNode && (
-        <DetailPanel
-          detail={detail}
-          loading={detailLoading}
-          selectedNode={selectedNode}
-          onClose={handleBackgroundClick}
-          onNodeNavigate={handleNodeNavigate}
-          onMarkTested={handleMarkTested}
-          onCommunityClick={handleCommunityClick}
-        />
+        <ErrorBoundary selectedNode={selectedNode} onReset={handleBackgroundClick}>
+          <DetailPanel
+            detail={detail}
+            loading={detailLoading}
+            selectedNode={selectedNode}
+            onClose={handleBackgroundClick}
+            onNodeNavigate={handleNodeNavigate}
+            onMarkTested={handleMarkTested}
+            onCommunityClick={handleCommunityClick}
+          />
+        </ErrorBoundary>
       )}
     </div>
   )

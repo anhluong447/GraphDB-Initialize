@@ -6,15 +6,62 @@ import threading
 # Add project root to path so imports work
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+import logging
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from nelgraph.graph.neo4j_client import get_client
 from nelgraph.query.engine import query, get_node_detail, list_open_tasks
-from nelgraph.config import PROJECT_NAME, CODEBASE_PATH, SYNC_STATE_PATH
+from nelgraph.config import PROJECT_NAME, CODEBASE_PATH, SYNC_STATE_PATH, GRAPHRAG_DATA_DIR
+
+# Set up logging to file in .graphrag_data and standard output
+os.makedirs(GRAPHRAG_DATA_DIR, exist_ok=True)
+log_file = os.path.join(GRAPHRAG_DATA_DIR, "viz.log")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(log_file, encoding="utf-8"),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("nelgraph.viz")
+logger.info(f"Starting visualization API for project '{PROJECT_NAME}' at '{CODEBASE_PATH}'")
+logger.info(f"Session logs will be saved to '{log_file}'")
 
 app = FastAPI(title="GraphRAG Visualization API")
-
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+class FrontendLog(BaseModel):
+    level: str
+    message: str
+    stack: Optional[str] = None
+    componentStack: Optional[str] = None
+    source: Optional[str] = None
+    selectedNode: Optional[Dict[str, Any]] = None
+
+@app.post("/log")
+def log_frontend_event(event: FrontendLog):
+    log_msg = f"Frontend [{event.level.upper()}] from {event.source or 'unknown'}: {event.message}"
+    if event.selectedNode:
+        log_msg += f" (selectedNode: {event.selectedNode})"
+    if event.stack:
+        log_msg += f"\nStack trace:\n{event.stack}"
+    if event.componentStack:
+        log_msg += f"\nComponent stack:\n{event.componentStack}"
+    
+    if event.level.lower() == "error":
+        logger.error(log_msg)
+    elif event.level.lower() == "warning":
+        logger.warning(log_msg)
+    else:
+        logger.info(log_msg)
+        
+    return {"success": True}
+
 
 
 # ─────────────────────────────────────────────────────────────
@@ -304,53 +351,68 @@ def search_query(q: str):
 @app.get("/node/{name}")
 def node_detail(name: str):
     """Get full info about a specific node, including enriched fields and community."""
+    logger.info(f"API Request: GET /node/{name}")
     client = get_client()
-    result = client.run("""
-        MATCH (n) WHERE n.name = $name
-        OPTIONAL MATCH (n)-[:BELONGS_TO]->(c:Community)
-        OPTIONAL MATCH (n)-[r_out]->(neighbor)
-        OPTIONAL MATCH (caller)-[r_in]->(n)
-        RETURN n,
-               labels(n) as labels,
-               c.name as community_name,
-               collect(DISTINCT {type: type(r_out), target: neighbor.name}) as outgoing,
-               collect(DISTINCT {type: type(r_in), source: caller.name}) as incoming
-        LIMIT 1
-    """, {"name": name})
+    try:
+        result = client.run("""
+            MATCH (n) WHERE n.name = $name
+            OPTIONAL MATCH (n)-[:BELONGS_TO]->(c:Community)
+            OPTIONAL MATCH (n)-[r_out]->(neighbor)
+            OPTIONAL MATCH (caller)-[r_in]->(n)
+            RETURN n,
+                   labels(n) as labels,
+                   c.name as community_name,
+                   collect(DISTINCT {type: type(r_out), target: neighbor.name}) as outgoing,
+                   collect(DISTINCT {type: type(r_in), source: caller.name}) as incoming
+            LIMIT 1
+        """, {"name": name})
 
-    if not result:
-        return {}
+        if not result:
+            logger.warning(f"Node '{name}' not found in DB")
+            return {}
 
-    record = result[0]
-    node_dict = dict(record["n"])
-    labels = record.get("labels", [])
+        record = result[0]
+        node_dict = dict(record["n"])
+        labels = record.get("labels", [])
 
-    # Read raw code for Function/Class nodes
-    if any(l in ["Function", "Class"] for l in labels):
-        try:
-            node_dict["raw_code"] = client.read_node_code(node_dict)
-        except Exception:
-            pass
+        # Read raw code for Function/Class nodes
+        if any(l in ["Function", "Class"] for l in labels):
+            try:
+                node_dict["raw_code"] = client.read_node_code(node_dict)
+            except Exception as code_ex:
+                logger.warning(f"Failed to read raw code for '{name}': {code_ex}")
+                pass
 
-    # Ensure all enriched fields are present
-    enriched_fields = [
-        "how_it_works", "inputs", "output", "raises",
-        "edge_cases", "test_recommendations",
-        "complexity", "is_async", "visibility",
-        "start_line", "end_line", "tested",
-        "docstring", "class_name", "community_id", "file"
-    ]
-    for field in enriched_fields:
-        if field not in node_dict:
-            node_dict[field] = None
+        # Ensure all enriched fields are present
+        enriched_fields = [
+            "how_it_works", "inputs", "output", "raises",
+            "edge_cases", "test_recommendations",
+            "complexity", "is_async", "visibility",
+            "start_line", "end_line", "tested",
+            "docstring", "class_name", "community_id", "file"
+        ]
+        for field in enriched_fields:
+            if field not in node_dict:
+                node_dict[field] = None
 
-    return {
-        "node": node_dict,
-        "labels": labels,
-        "community_name": record.get("community_name"),
-        "outgoing": record["outgoing"],
-        "incoming": record["incoming"],
-    }
+        # Log node detail values to help diagnose frontend crashes
+        logger.info(
+            f"Node '{name}' loaded. Type: {labels[0] if labels else 'None'}. "
+            f"Inputs: {node_dict.get('inputs')} (type: {type(node_dict.get('inputs'))}). "
+            f"Edge cases: {node_dict.get('edge_cases')} (type: {type(node_dict.get('edge_cases'))}). "
+            f"Test recs: {node_dict.get('test_recommendations')} (type: {type(node_dict.get('test_recommendations'))})."
+        )
+
+        return {
+            "node": node_dict,
+            "labels": labels,
+            "community_name": record.get("community_name"),
+            "outgoing": record["outgoing"],
+            "incoming": record["incoming"],
+        }
+    except Exception as ex:
+        logger.error(f"Error fetching node detail for '{name}': {ex}", exc_info=True)
+        raise ex
 
 
 @app.get("/tasks")
