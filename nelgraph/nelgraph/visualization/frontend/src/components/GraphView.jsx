@@ -36,11 +36,21 @@ export default function GraphView({ graphData, graphLoading, stats, onNodeClick,
     return () => clearTimeout(debounceRef.current)
   }, [searchQuery, setHighlightNodes])
 
+  const filteredNodes = activeFilter === 'All'
+    ? graphData.nodes
+    : graphData.nodes.filter(n => n.type === activeFilter)
+
+  const nodeIds = new Set(filteredNodes.map(n => String(n.id)))
+
+  const filteredLinks = graphData.links.filter(l => {
+    const sourceId = String(l.source?.id || l.source)
+    const targetId = String(l.target?.id || l.target)
+    return nodeIds.has(sourceId) && nodeIds.has(targetId)
+  })
+
   const filteredData = {
-    nodes: activeFilter === 'All'
-      ? graphData.nodes
-      : graphData.nodes.filter(n => n.type === activeFilter),
-    links: graphData.links,
+    nodes: filteredNodes,
+    links: filteredLinks,
   }
 
   const nodeColor = useCallback((node) => {

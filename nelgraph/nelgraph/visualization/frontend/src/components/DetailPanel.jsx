@@ -11,8 +11,11 @@ export default function DetailPanel({ detail, loading, selectedNode, onClose, on
   if (node.inputs) {
     try {
       const inp = typeof node.inputs === 'string' ? JSON.parse(node.inputs) : node.inputs
-      if (Array.isArray(inp)) parsedInputs = inp
-      else if (typeof inp === 'object') parsedInputs = Object.entries(inp).map(([k, v]) => ({ name: k, type: v }))
+      if (Array.isArray(inp)) {
+        parsedInputs = inp
+      } else if (inp && typeof inp === 'object') {
+        parsedInputs = Object.entries(inp).map(([k, v]) => ({ name: k, type: v }))
+      }
     } catch {}
   }
 
@@ -120,10 +123,10 @@ export default function DetailPanel({ detail, loading, selectedNode, onClose, on
             </Section>
 
             {/* Called by */}
-            {detail?.incoming?.filter(r => r.source).length > 0 && (
+            {detail?.incoming?.filter(r => r && r.source).length > 0 && (
               <Section title="Called by">
                 <div style={styles.chipContainer}>
-                  {detail.incoming.filter(r => r.source).map((r, i) => (
+                  {detail.incoming.filter(r => r && r.source).map((r, i) => (
                     <button key={i} onClick={() => onNodeNavigate(r.source)} style={styles.chip}>
                       <span style={{ fontSize: 10 }}>ƒ</span> {r.source}
                     </button>
@@ -133,10 +136,10 @@ export default function DetailPanel({ detail, loading, selectedNode, onClose, on
             )}
 
             {/* Calls */}
-            {detail?.outgoing?.filter(r => r.target).length > 0 && (
+            {detail?.outgoing?.filter(r => r && r.target).length > 0 && (
               <Section title="Calls">
                 <div style={styles.chipContainer}>
-                  {detail.outgoing.filter(r => r.target).map((r, i) => (
+                  {detail.outgoing.filter(r => r && r.target).map((r, i) => (
                     <button key={i} onClick={() => onNodeNavigate(r.target)} style={styles.chip}>
                       <span style={{ fontSize: 10 }}>ƒ</span> {r.target}
                     </button>
@@ -162,7 +165,7 @@ export default function DetailPanel({ detail, loading, selectedNode, onClose, on
 
 function CommunityDetailContent({ detail, onNodeNavigate }) {
   const node = detail?.node || {}
-  const members = detail?.outgoing?.filter(r => r.target) || []
+  const members = detail?.outgoing?.filter(r => r && r.target) || []
   return (
     <>
       {node.summary && <Section title="Summary"><p style={styles.bodyText}>{node.summary}</p></Section>}
@@ -193,8 +196,11 @@ function Section({ title, children }) {
 function parseList(val) {
   if (!val) return []
   if (Array.isArray(val)) return val
-  try { const p = JSON.parse(val); if (Array.isArray(p)) return p } catch {}
-  return val.split('\n').filter(Boolean)
+  if (typeof val === 'string') {
+    try { const p = JSON.parse(val); if (Array.isArray(p)) return p } catch {}
+    return val.split('\n').filter(Boolean)
+  }
+  return [String(val)]
 }
 
 function getBadgeStyle(type) {
