@@ -92,14 +92,18 @@ export default function DetailPanel({ detail, loading, selectedNode, onClose, on
             {/* Edge cases */}
             {edgeCases.length > 0 && (
               <Section title="Edge cases">
-                <ul style={styles.bulletList}>{edgeCases.map((e, i) => <li key={i}>{e}</li>)}</ul>
+                <ul style={styles.bulletList}>
+                  {edgeCases.map((e, i) => <li key={i}>{renderListItem(e)}</li>)}
+                </ul>
               </Section>
             )}
 
             {/* Test recommendations */}
             {testRecs.length > 0 && (
               <Section title="Test recommendations">
-                <ul style={styles.bulletList}>{testRecs.map((t, i) => <li key={i}>{t}</li>)}</ul>
+                <ul style={styles.bulletList}>
+                  {testRecs.map((t, i) => <li key={i}>{renderListItem(t)}</li>)}
+                </ul>
                 {!node.tested && onMarkTested && (
                   <button onClick={() => onMarkTested(node.name || selectedNode.name)} style={styles.markTestedBtn}>
                     Mark as tested
@@ -206,6 +210,19 @@ function parseList(val) {
     return val.split('\n').filter(Boolean)
   }
   return [String(val)]
+}
+
+function renderListItem(item) {
+  if (!item) return ''
+  if (typeof item === 'object') {
+    const parts = []
+    const typeOrPath = item.type || item.path
+    if (typeOrPath) parts.push(`[${typeOrPath}] `)
+    if (item.name) parts.push(`${item.name}: `)
+    parts.push(item.description || item.summary || JSON.stringify(item))
+    return parts.join('')
+  }
+  return String(item)
 }
 
 function getBadgeStyle(type) {
