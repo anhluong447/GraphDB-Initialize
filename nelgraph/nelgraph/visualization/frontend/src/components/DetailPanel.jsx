@@ -1,4 +1,4 @@
-export default function DetailPanel({ detail, loading, selectedNode, onClose, onNodeNavigate, onMarkTested, onCommunityClick }) {
+export default function DetailPanel({ detail, loading, selectedNode, onClose, onNodeNavigate, onMarkTested, onCommunityClick, onGenerateTest }) {
   if (!selectedNode) return null
 
   const node = detail?.node || {}
@@ -165,6 +165,16 @@ export default function DetailPanel({ detail, loading, selectedNode, onClose, on
                 </pre>
               </Section>
             )}
+
+            {/* Generate Tests button */}
+            {nodeType === 'Function' && onGenerateTest && (
+              <button
+                onClick={() => onGenerateTest({ name: node.name || selectedNode.name, file: node.file, class_name: node.class_name })}
+                style={styles.generateTestBtn}
+              >
+                🧪 Generate Tests
+              </button>
+            )}
           </>
         )}
       </div>
@@ -288,5 +298,11 @@ const styles = {
     marginTop: 8, fontSize: 12, padding: '6px 12px', borderRadius: 'var(--radius-md)',
     border: 'none', background: 'var(--badge-tested-bg)', color: 'var(--badge-tested-color)',
     cursor: 'pointer', fontWeight: 500,
+  },
+  generateTestBtn: {
+    width: '100%', marginTop: 12, marginBottom: 8, fontSize: 12, padding: '8px 12px',
+    borderRadius: 'var(--radius-md)', border: '1px solid var(--color-accent)',
+    background: 'var(--color-accent-muted)', color: 'var(--color-accent)',
+    cursor: 'pointer', fontWeight: 500, transition: 'background 120ms ease',
   },
 }

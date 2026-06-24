@@ -22,6 +22,7 @@ from nelgraph.knowledge_base import (
     search,
     run_init,
     run_sync,
+    run_test_generation,
     get_class_context,
     dump_context_to_file,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "search",
     "run_init",
     "run_sync",
+    "run_test_generation",
     "get_class_context",
     "dump_context_to_file",
 ]
@@ -146,7 +148,7 @@ def configure(
     import sys
     for mod_name, mod in list(sys.modules.items()):
         if mod and (mod_name.startswith("nelgraph.") or mod_name in ["initialize_graph", "knowledge_base", "core.init_pipeline", "core.sync_pipeline", "graph.builder", "graph.neo4j_client", "embeddings.chroma_client", "embeddings.embedder", "extractors.llm_extractor", "extractors.testing_enricher", "parsers.git_parser", "updater.git_hook"]):
-            for key in ["CODEBASE_PATH", "GRAPHRAG_DATA_DIR", "NEO4J_DATA_DIR", "NEO4J_LOGS_DIR", "CHROMA_PATH", "SYNC_STATE_PATH", "OPENROUTER_API_KEY", "LLM_MODEL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS", "NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD"]:
+            for key in ["CODEBASE_PATH", "GRAPHRAG_DATA_DIR", "NEO4J_DATA_DIR", "NEO4J_LOGS_DIR", "CHROMA_PATH", "SYNC_STATE_PATH", "TEST_REGISTRY_PATH", "OPENROUTER_API_KEY", "LLM_MODEL", "EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS", "NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "COMMANDER_MODEL", "WORKER_MODEL", "TEST_FRAMEWORK", "MAX_HEAL_RETRIES"]:
                 if hasattr(_cfg, key):
                     val = getattr(_cfg, key)
                     if hasattr(mod, key):

@@ -3,7 +3,7 @@ import axios from 'axios'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
-export default function TestCoverageView({ status, onMarkTested }) {
+export default function TestCoverageView({ status, onMarkTested, onGenerateTest }) {
   const [untested, setUntested] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -80,6 +80,9 @@ export default function TestCoverageView({ status, onMarkTested }) {
                   {(f.complexity || 0) >= 5 && (
                     <span style={styles.complexityBadge}>{f.complexity}</span>
                   )}
+                  {onGenerateTest && (
+                    <button onClick={() => onGenerateTest({ name: f.name, file: f.file, class_name: f.class_name })} style={styles.genBtn}>🧪 Gen</button>
+                  )}
                   <button onClick={() => handleMark(f.name)} style={styles.markBtn}>Mark tested</button>
                 </div>
               ))}
@@ -102,5 +105,6 @@ const styles = {
   groupHeader: { fontSize: 11, fontWeight: 500, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.3px', padding: '8px 0 4px', borderBottom: '0.5px solid var(--color-border-tertiary)', marginBottom: 4 },
   funcItem: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '0.5px solid var(--color-border-tertiary)' },
   complexityBadge: { fontSize: 10, padding: '2px 6px', borderRadius: 2, background: 'var(--color-danger-muted)', color: 'var(--color-danger)', fontWeight: 500 },
+  genBtn: { fontSize: 11, padding: '4px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-accent)', background: 'var(--color-accent-muted)', color: 'var(--color-accent)', cursor: 'pointer', fontWeight: 500, flexShrink: 0 },
   markBtn: { fontSize: 11, padding: '4px 10px', borderRadius: 'var(--radius-md)', border: 'none', background: 'var(--badge-tested-bg)', color: 'var(--badge-tested-color)', cursor: 'pointer', fontWeight: 500, flexShrink: 0 },
 }

@@ -547,3 +547,26 @@ def run_sync():
     _assert_configured()
     from nelgraph.initialize_graph import run_incremental_sync
     run_incremental_sync()
+
+
+def run_test_generation(target: str, mode: str = "unit", file: str = None, class_name: str = None) -> dict:
+    """
+    Autonomous test generation using the dual-model TestAgent.
+
+    Commander (DeepSeek-R1) plans strategy and diagnoses failures.
+    Worker (Qwen3 Coder Next) generates and fixes test code.
+
+    Args:
+        target: Function/class name or search query.
+        mode: "unit" | "integration" | "system"
+        file: Optional file path for disambiguation.
+        class_name: Optional class name for disambiguation.
+
+    Returns:
+        dict with keys: success, summary, generated_files, test_results, bugs_found, log
+    """
+    _assert_configured()
+    from nelgraph.core.test_agent import TestAgent
+    agent = TestAgent(target=target, mode=mode, file=file, class_name=class_name)
+    return agent.run()
+

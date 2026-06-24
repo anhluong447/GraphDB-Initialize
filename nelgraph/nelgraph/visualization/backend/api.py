@@ -63,6 +63,77 @@ def log_frontend_event(event: FrontendLog):
     return {"success": True}
 
 
+# ─────────────────────────────────────────────────────────────
+# TestAgent — Autonomous test generation endpoints
+# ─────────────────────────────────────────────────────────────
+import uuid
+
+_test_tasks = {}  # In-memory task store: {task_id: {status, result, ...}}
+
+class TestGenRequest(BaseModel):
+    target: str
+    mode: str = "unit"
+    file: Optional[str] = None
+    class_name: Optional[str] = None
+
+@app.post("/generate_tests")
+def generate_tests(req: TestGenRequest):
+    """Trigger autonomous test generation in background. Returns a task_id to poll."""
+    task_id = str(uuid.uuid4())[:8]
+    _test_tasks[task_id] = {"status": "running", "result": None, "started_at": time.strftime("%H:%M:%S")}
+
+    def _run():
+        try:
+            from nelgraph.core.test_agent import TestAgent
+            agent = TestAgent(target=req.target, mode=req.mode, file=req.file, class_name=req.class_name)
+            result = agent.run()
+            _test_tasks[task_id] = {"status": "done", "result": result}
+        except Exception as e:
+            logger.error(f"TestAgent error: {e}", exc_info=True)
+            _test_tasks[task_id] = {"status": "error", "result": {"error": str(e), "log": []}}
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    logger.info(f"TestAgent task {task_id} started: target={req.target}, mode={req.mode}")
+    return {"task_id": task_id, "status": "running"}
+
+
+@app.get("/task/{task_id}/status")
+def get_task_status(task_id: str):
+    """Poll the status of a test generation task."""
+    task = _test_tasks.get(task_id)
+    if not task:
+        return {"error": "Task not found"}
+    return task
+
+
+class TestRunRequest(BaseModel):
+    file_path: str
+
+@app.post("/test/run")
+def run_single_test(req: TestRunRequest):
+    """Run a single test file and return results."""
+    import subprocess, sys
+    abs_path = os.path.join(CODEBASE_PATH, req.file_path).replace("\\", "/")
+    if not os.path.exists(abs_path):
+        return {"status": "error", "output": f"File not found: {abs_path}"}
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", abs_path, "-v", "--tb=short", "--no-header", "-q"],
+            cwd=CODEBASE_PATH,
+            capture_output=True, text=True, timeout=60,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        output = (proc.stdout or "") + (proc.stderr or "")
+        return {"status": "passed" if proc.returncode == 0 else "failed", "output": output, "returncode": proc.returncode}
+    except subprocess.TimeoutExpired:
+        return {"status": "failed", "output": "Timed out (60s)", "returncode": -1}
+    except Exception as e:
+        return {"status": "failed", "output": str(e), "returncode": -1}
+
+
+import time
 
 # ─────────────────────────────────────────────────────────────
 # NEW: GET /status — Project overview

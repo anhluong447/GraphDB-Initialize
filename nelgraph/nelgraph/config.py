@@ -64,6 +64,12 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-large")
 EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "512"))
 ENRICH_MIN_COMPLEXITY = int(os.getenv("ENRICH_MIN_COMPLEXITY", "2"))
 
+# TestAgent — dual-model autonomous test generation
+COMMANDER_MODEL = os.getenv("COMMANDER_MODEL", "deepseek/deepseek-r1")
+WORKER_MODEL = os.getenv("WORKER_MODEL", "qwen/qwen3-coder-next")
+TEST_FRAMEWORK = os.getenv("TEST_FRAMEWORK", "pytest")  # pytest | jest | vitest
+MAX_HEAL_RETRIES = int(os.getenv("MAX_HEAL_RETRIES", "3"))
+
 # Neo4j
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")
 import sys
@@ -84,6 +90,7 @@ CHROMA_PATH = CHROMA_PATH.replace("\\", "/")
 
 # Sync state file for incremental updates
 SYNC_STATE_PATH = os.path.join(GRAPHRAG_DATA_DIR, "sync_state.json").replace("\\", "/")
+TEST_REGISTRY_PATH = os.path.join(GRAPHRAG_DATA_DIR, "test_registry.json").replace("\\", "/")
 
 LOCK_PATH = os.path.join(GRAPHRAG_DATA_DIR, ".nelgraph.lock").replace("\\", "/")
 

@@ -7,6 +7,7 @@ import FunctionsView from './components/FunctionsView'
 import TestCoverageView from './components/TestCoverageView'
 import CommitsView from './components/CommitsView'
 import DetailPanel from './components/DetailPanel'
+import TestGenerationDrawer from './components/TestGenerationDrawer'
 import ErrorBoundary from './components/ErrorBoundary'
 import { useStatus } from './hooks/useStatus'
 import { useGraph } from './hooks/useGraph'
@@ -19,6 +20,7 @@ export default function App() {
   const [selectedNodeName, setSelectedNodeName] = useState(null)
   const [selectedNode, setSelectedNode] = useState(null)
   const [highlightNodes, setHighlightNodes] = useState(new Set())
+  const [testGenTarget, setTestGenTarget] = useState(null) // {name, file, class_name}
 
   const { status, refresh: refreshStatus } = useStatus()
   const { graphData, loading: graphLoading, stats, loadFullGraph, loadCommunitySubgraph } = useGraph()
@@ -74,6 +76,10 @@ export default function App() {
     } catch {}
   }, [refreshStatus])
 
+  const handleGenerateTest = useCallback((nodeInfo) => {
+    setTestGenTarget(nodeInfo)
+  }, [])
+
   const renderView = () => {
     switch (activeView) {
       case 'graph':
@@ -89,7 +95,7 @@ export default function App() {
       case 'functions':
         return <FunctionsView onNodeClick={handleNodeClick} />
       case 'coverage':
-        return <TestCoverageView status={status} onMarkTested={handleMarkTested} />
+        return <TestCoverageView status={status} onMarkTested={handleMarkTested} onGenerateTest={handleGenerateTest} />
       case 'commits':
         return <CommitsView />
       default:
@@ -119,8 +125,17 @@ export default function App() {
             onNodeNavigate={handleNodeNavigate}
             onMarkTested={handleMarkTested}
             onCommunityClick={handleCommunityClick}
+            onGenerateTest={handleGenerateTest}
           />
         </ErrorBoundary>
+      )}
+      {testGenTarget && (
+        <TestGenerationDrawer
+          target={testGenTarget.name}
+          file={testGenTarget.file}
+          className={testGenTarget.class_name}
+          onClose={() => setTestGenTarget(null)}
+        />
       )}
     </div>
   )
