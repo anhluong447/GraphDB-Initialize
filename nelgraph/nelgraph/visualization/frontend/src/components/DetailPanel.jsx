@@ -63,12 +63,17 @@ export default function DetailPanel({ detail, loading, selectedNode, onClose, on
             {/* Signature */}
             {(parsedInputs.length > 0 || node.output || node.raises) && (
               <Section title="Signature">
-                {parsedInputs.map((p, i) => (
-                  <div key={i} style={styles.propRow}>
-                    <span style={styles.propKey}>{p.name || p}</span>
-                    <span style={styles.propVal}>{p.type || p.annotation || ''}</span>
-                  </div>
-                ))}
+                {parsedInputs.map((p, i) => {
+                  if (!p) return null
+                  const name = typeof p === 'object' ? (p.name || '') : p
+                  const type = typeof p === 'object' ? (p.type || p.annotation || '') : ''
+                  return (
+                    <div key={i} style={styles.propRow}>
+                      <span style={styles.propKey}>{name}</span>
+                      <span style={styles.propVal}>{type}</span>
+                    </div>
+                  )
+                })}
                 {node.output && (
                   <div style={styles.propRow}>
                     <span style={styles.propKey}>returns</span>
@@ -149,7 +154,7 @@ export default function DetailPanel({ detail, loading, selectedNode, onClose, on
             )}
 
             {/* Source */}
-            {node.raw_code && (
+            {node.raw_code && typeof node.raw_code === 'string' && (
               <Section title="Source">
                 <pre style={styles.codeBlock}>
                   {node.raw_code.length > 800 ? node.raw_code.slice(0, 800) + '\n... (truncated)' : node.raw_code}
