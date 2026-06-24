@@ -332,7 +332,7 @@ class TestAgent:
                 model=cfg.COMMANDER_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=4000,
-                timeout=120.0,
+                timeout=300.0,
             )
             content = response.choices[0].message.content
             if not content:
@@ -406,7 +406,7 @@ class TestAgent:
                     model=cfg.WORKER_MODEL,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=8000,
-                    timeout=120.0,
+                    timeout=300.0,
                 )
                 test_code = response.choices[0].message.content
                 if not test_code:
@@ -581,7 +581,7 @@ class TestAgent:
                 model=cfg.COMMANDER_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=2000,
-                timeout=90.0,
+                timeout=180.0,
             )
             content = response.choices[0].message.content
             if not content:
@@ -614,7 +614,7 @@ class TestAgent:
                 model=cfg.WORKER_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=8000,
-                timeout=120.0,
+                timeout=300.0,
             )
             code = response.choices[0].message.content
             if not code:
