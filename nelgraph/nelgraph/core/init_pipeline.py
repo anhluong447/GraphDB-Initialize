@@ -270,7 +270,6 @@ def run_full_init():
         "mode": "full_init",
     })
 
-    _generate_agent_query_guide()
     _copy_agent_skills()
 
     # Automatically install git post-commit hook
@@ -293,137 +292,8 @@ def run_full_init():
         print("\n[GitHook] ⚠ Warning: Target directory is not a Git repository. The graph will not be auto-updated on commit.")
 
 
-def _generate_agent_query_guide():
-    agent_dir = os.path.join(CODEBASE_PATH, ".agent", "nelgraph")
-    os.makedirs(agent_dir, exist_ok=True)
-    guide_path = os.path.join(agent_dir, "SKILL.md")
-    
-    guide_content = """# nelgraph — Agent Interface
-
-## ---
-name: nelgraph
-description: Query a codebase knowledge graph to understand code structure, function logic, dependencies, and test recommendations. Use when you need to analyze, test, or modify an existing codebase.
----
-
-# nelgraph — Agent Interface
-
-You have access to a codebase knowledge graph via `nelgraph`.
-Always query the graph before writing any code, tests, or analysis.
-Neo4j and ChromaDB are already running if the user ran `nelgraph init`.
-
-## When to use this skill
-
-- Use this when the task involves reading, analyzing, or testing existing code
-- Use this before writing any new code that touches existing functions
-- Use this when you need to understand how functions relate to each other
-- Use this when working from a commit or PR and need to know what changed
-
-## How to use it
-
-### Step 0: Sync before starting
-
-Always run this at the start of a session to avoid stale data:
-
-```python
-import subprocess
-subprocess.run(["nelgraph", "sync"], check=True)
-```
-
-### Step 1: Get your bearings
-
-If you're starting fresh and don't know the codebase:
-
-```python
-import nelgraph
-
-snap = nelgraph.get_snapshot()
-# → {"total": int, "communities": [{"id", "summary", "functions": [...]}]}
-# functions inside each community are sorted by priority_score
-# (complexity + call frequency + change count)
-```
-
-If you're working from a specific commit:
-
-```python
-changes = nelgraph.get_changes("a3f9c12")
-# → {"risk_level": "high"|"medium"|"low", "changed_functions": [...]}
-```
-
-### Step 2: Find the functions you need
-
-If you don't know the function name, search by intent:
-
-```python
-results = nelgraph.search("how does user authentication work", top_k=10)
-# → [{"name": str, "file": str, "score": float, "description": str}, ...]
-```
-
-If you know the name, go straight to full context:
-
-```python
-ctx = nelgraph.get_function_context("login")
-# → {
-#     "name", "file", "raw_code",
-#     "how_it_works",           # plain-English summary
-#     "inputs",                 # parameters + types
-#     "edge_cases",             # list of boundary scenarios
-#     "test_recommendations",   # what to mock, what test cases to write
-#     "callers",                # functions that call this one
-#     "callees"                 # functions this one calls
-#   }
-```
-
-> **Ambiguous name?** If multiple classes have the same method name (e.g. `__init__`, `execute`),
-> the graph may return the wrong one. Disambiguate with `class_name` or `file`:
-> ```python
-> nelgraph.get_function_context("__init__", class_name="ShimizuBot")
-> nelgraph.get_function_context("execute", file="src/services/runner.py")
-> ```
-
-### Step 3: Mark progress
-
-After writing and verifying a test, persist the result to the graph:
-
-```python
-nelgraph.mark_tested("login")  # → True
-```
-
----
-
-## Quick reference
-
-| Situation                                    | Call                                         |
-| -------------------------------------------- | -------------------------------------------- |
-| Starting fresh, don't know the codebase      | `get_snapshot()`                             |
-| User mentions a specific function            | `get_function_context(name)`                 |
-| Same method name appears in multiple classes | `get_function_context(name, class_name=...)` |
-| Looking for functions related to a feature   | `search(query)`                              |
-| Working on a specific commit or PR           | `get_changes(commit_hash)`                   |
-| After writing and verifying a test           | `mark_tested(name)`                          |
-
----
-
-## Rules
-
-1. **Always sync first.** Run `nelgraph sync` before starting any session to avoid working with stale data.
-2. **Always query before writing.** Never guess at function signatures, logic, or dependencies — `get_function_context()` has the source code.
-3. **Use test_recommendations as your test plan.** It already lists what to mock and which cases to cover.
-4. **Prefer `get_function_context()` over `search()`** when you know the name. It's faster and returns full source code.
-5. **Disambiguate when the name is common.** Pass `class_name` or `file` to avoid getting the wrong function.
-6. **Mark functions after testing.** This persists to the graph so other agents and future runs know what's covered.
-"""
-
-
-    try:
-        with open(guide_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(guide_content)
-        print(f"[Init] Generated agent query guide at: {guide_path}")
-    except Exception as e:
-        print(f"[Init] Warning: Could not generate agent query guide: {e}")
-
-
 def _copy_agent_skills():
-    """Copy the 3 skill files from package skills/ directory to <CODEBASE_PATH>/.agent/nelgraph/"""
+    """Copy the SKILL.md file from package skills/ directory to <CODEBASE_PATH>/.agent/nelgraph/ and cleanup legacy skills."""
     import shutil
     dest_dir = os.path.join(CODEBASE_PATH, ".agent", "nelgraph")
     os.makedirs(dest_dir, exist_ok=True)
@@ -457,13 +327,15 @@ def _copy_agent_skills():
         except Exception:
             pass
             
-    # 2. Old loose files in .agent/
-    for f in ["nelgraph-community.md", "nelgraph-query.md", "nelgraph-sync.md"]:
-        old_file = os.path.join(CODEBASE_PATH, ".agent", f)
-        if os.path.exists(old_file):
-            try:
-                os.remove(old_file)
-                print(f"[Init] Cleaned up legacy file {old_file}")
-            except Exception:
-                pass
+    # 2. Old loose files in .agent/ and .agent/nelgraph/
+    for folder in [os.path.join(CODEBASE_PATH, ".agent"), dest_dir]:
+        for f in ["nelgraph-community.md", "nelgraph-query.md", "nelgraph-sync.md"]:
+            old_file = os.path.join(folder, f)
+            if os.path.exists(old_file):
+                try:
+                    os.remove(old_file)
+                    print(f"[Init] Cleaned up legacy file {old_file}")
+                except Exception:
+                    pass
+
 
