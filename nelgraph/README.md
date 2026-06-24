@@ -3,11 +3,11 @@
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
-[![Version](https://img.shields.io/badge/version-1.1.4-orange.svg)]()
+[![Version](https://img.shields.io/badge/version-1.1.7-orange.svg)]()
 
 An autonomous, zero-configuration **GraphRAG (Graph Retrieval-Augmented Generation)** knowledge base builder and semantic search engine optimized for local codebases and autonomous AI coding agents. 
 
-It automatically parses source code, builds Abstract Syntax Tree (AST) call graphs, resolves class hierarchies, maps Git commit histories, and ingests them into a unified hybrid database system (**Neo4j** for structural graph relations + **ChromaDB** for vector semantic indexes) powered by **DeepSeek V4-Flash**.
+It automatically parses source code, builds Abstract Syntax Tree (AST) call graphs, resolves class hierarchies, maps Git commit histories, and ingests them into a unified hybrid database system (**Neo4j** for structural structural relations + **ChromaDB** for vector semantic indexes) powered by **DeepSeek V4-Flash**.
 
 ---
 
@@ -20,8 +20,9 @@ It automatically parses source code, builds Abstract Syntax Tree (AST) call grap
 6. [CLI Command Reference](#-cli-command-reference)
 7. [Programmatic Python API](#-programmatic-python-api)
 8. [Interactive Visualization Dashboard](#-interactive-visualization-dashboard)
-9. [Automated Testing Environment](#-automated-testing-environment)
-10. [Agent Skill Integration](#-agent-skill-integration)
+9. [Autonomous Test Generation & Self-Healing](#-autonomous-test-generation--self-healing)
+10. [Automated Testing Environment](#-automated-testing-environment)
+11. [Agent Skill Integration](#-agent-skill-integration)
 
 ---
 
@@ -36,13 +37,15 @@ AI coding agents struggle with large codebases because reading raw files is slow
 
 ## ✨ Key Features
 
+* 🧠 **Autonomous AI Test Generation**: Automatically generates complete, runnable unit, integration, and system tests utilizing a dual-agent **Commander-Worker** pattern.
+* 🛡️ **AI Self-Healing Loop**: Executes generated tests inside an isolated sandbox, automatically intercepts errors, diagnoses them via the Commander, and implements code fixes via the Worker (up to 3 retries).
 * 🧬 **AST Call-Graph Parser**: Powered by **Tree-Sitter** to parse Python, PHP, JavaScript, and TypeScript/JSX/TSX. It extracts classes, functions, complexity, input signatures, return types, raises, and constructs precise call relationships.
 * 📦 **Dynamic Import & Dependency Tracker**: Maps module imports (`File -[:IMPORTS]-> Module`). Automatically distinguishes standard library, external packages, and internal project dependencies.
 * 🌿 **Git Commit-to-Function Mapper**: Parses Git commit diffs to link modified lines directly to the specific functions they affected (`Commit -[:CHANGED]-> Function`), enabling precise Test Impact Analysis.
 * 🔍 **Hybrid Vector-Graph Queries**: Combines vector database semantic similarity searches (ChromaDB) with graph relation expansions (Neo4j) to synthesis comprehensive multi-layered context.
 * 🔄 **Git Hooks Auto-Sync**: Integrates post-commit and pre-push hooks to automatically run incremental synchronizations, ensuring the graph never becomes stale.
 * 🛠️ **Self-Healing LLM Extraction**: Combines `json-repair` with a self-correction feedback loop. If the LLM generates malformed JSON metadata, the system automatically feeds the errors back to the LLM to self-heal and regenerate (up to 4 retries).
-* 📊 **Interactive Force-Directed Dashboard**: Launch a local web explorer (`nelgraph viz`) with optimized layout physics (node collision protection, charge range limits) to visually map and filter classes, functions, files, communities, and test coverage.
+* 📊 **Interactive Force-Directed Dashboard**: Launch a local web explorer (`nelgraph viz`) with node collision protection, charge range limits, and a **Test Generation & Run Drawer** to visually trigger test generation and view test run logs.
 
 ---
 
@@ -130,7 +133,9 @@ import nelgraph
 # 1. Optional configuration (fallback to local .env if not specified)
 nelgraph.configure(
     codebase_path="/absolute/path/to/project",
-    openrouter_api_key="your-openrouter-api-key"
+    openrouter_api_key="your-openrouter-api-key",
+    commander_model="deepseek/deepseek-r1",
+    worker_model="qwen/qwen3-coder-next"
 )
 
 # 2. Orient: Get high-level overview of codebase grouped by community clusters
@@ -162,6 +167,15 @@ nelgraph.dump_context_to_file("execute", "context_export.md", format="markdown")
 
 # 7. Mark Tested: Persist unit test completion status directly into Neo4j
 nelgraph.mark_tested("execute", file="src/processors/order.py")
+
+# 8. Autonomous Test Generation: Trigger the Commander-Worker self-healing loop
+report = nelgraph.run_test_generation(
+    target="execute", 
+    mode="unit", 
+    file="src/processors/order.py"
+)
+print("Test Generation Summary:", report["summary"])
+print("Bugs Found:", report["bugs_found"])
 ```
 
 ---
@@ -179,6 +193,28 @@ To ensure complex codebases are easy to explore, the visualizer uses customized 
 * **Anti-Overlap Collision**: Integrates `forceCollide` representing nodes as physical circles with safety margins (`radius + 14px`). Node labels and icons never overlap.
 * **Compact Peripheries**: Restricts many-body repulsion (`charge`) to a maximum radius using `distanceMax(250)`. This prevents disconnected files and external libraries from floating away into infinity, keeping them compactly structured around the main clusters.
 * **Stretched Clusters**: Adjusts default link distances to `80px`, spreading out highly connected clusters for clean visibility.
+
+---
+
+## 🧠 Autonomous Test Generation & Self-Healing
+
+`nelgraph` features an advanced, agentic dual-model test generation suite designed to autonomously build, execute, and fix test suites:
+
+### 1. Dual-Agent Architecture
+* **Commander (`deepseek/deepseek-r1`)**: Analyzes the graph structure, dependencies, and imports to outline a structured JSON test plan. If tests fail, it acts as a diagnostics agent to differentiate between test logic errors and real codebase bugs.
+* **Worker (`qwen/qwen3-coder-next`)**: Generates runnable test code using the specified framework (`pytest`/`jest`/`vitest`) based on the Commander's plan, and applies fixes based on the Commander's diagnoses.
+
+### 2. Self-Healing Loop
+When a generated test fails:
+1. The execution error output is caught and sent to the **Commander**.
+2. The Commander diagnoses the root cause. If it is a `"real_bug"` in the codebase, it logs a bug report. If it is a `"test_error"`, it generates specific fix instructions.
+3. The **Worker** receives the instructions and regenerates the corrected test code.
+4. The cycle repeats for up to `MAX_HEAL_RETRIES` (default: `3`).
+
+### 3. Incremental Synchronization & Customization Protection
+An incremental synchronization registry (`.graphrag_data/test_registry.json`) tracks both source function hashes and generated test file hashes. 
+* If the source code of a function changes, its test is regenerated.
+* If a developer manually edits or customizes a generated test file, `nelgraph` detects the hash mismatch and **skips regeneration** to prevent overwriting user modifications.
 
 ---
 
