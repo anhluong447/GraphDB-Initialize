@@ -1,49 +1,59 @@
-# GraphRAG for Codebases 🚀
+# nelgraph 🚀
 
-An autonomous, zero-configuration Knowledge Graph builder and semantic search engine optimized for local codebases and AI testing agents. It ingests source code, AST Call Graphs, and Git history into a hybrid Graph-Vector database (**Neo4j** + **ChromaDB**) using **DeepSeek V4-Flash**.
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
+[![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)]()
+[![License](https://img.shields.io/badge/license-MIT-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.1.4-orange.svg)]()
+
+An autonomous, zero-configuration **GraphRAG (Graph Retrieval-Augmented Generation)** knowledge base builder and semantic search engine optimized for local codebases and autonomous AI coding agents. 
+
+It automatically parses source code, builds Abstract Syntax Tree (AST) call graphs, resolves class hierarchies, maps Git commit histories, and ingests them into a unified hybrid database system (**Neo4j** for structural graph relations + **ChromaDB** for vector semantic indexes) powered by **DeepSeek V4-Flash**.
+
+---
+
+## 📖 Table of Contents
+1. [Core Philosophy](#-core-philosophy)
+2. [Key Features](#-key-features)
+3. [Technology Stack](#-technology-stack)
+4. [Project Structure](#-project-structure)
+5. [Installation & Setup](#-installation--setup)
+6. [CLI Command Reference](#-cli-command-reference)
+7. [Programmatic Python API](#-programmatic-python-api)
+8. [Interactive Visualization Dashboard](#-interactive-visualization-dashboard)
+9. [Automated Testing Environment](#-automated-testing-environment)
+10. [Agent Skill Integration](#-agent-skill-integration)
+
+---
+
+## 💡 Core Philosophy
+
+AI coding agents struggle with large codebases because reading raw files is slow, expensive, and lacks structural context. `nelgraph` bridges this gap:
+* **Graph-Driven Navigation**: Instead of searching files blindly, agents query a structured knowledge graph to instantly understand function calls, dependencies, and inheritance paths.
+* **Isolated Zero-Config Storage**: All database assets, environment details, and sync status profiles are nested locally within the target codebase's hidden directory (`.graphrag_data/`). No centralized servers to maintain or conflict.
+* **Dynamic Code Resolution**: Rather than duplicating source code into Neo4j (which bloats caches and causes drift), the graph maps methods to exact coordinates and code fingerprints. Code is loaded dynamically from disk on demand, with an auto-recovery parser that corrects coordinates if lines shift due to local edits.
 
 ---
 
 ## ✨ Key Features
 
-1. **Zero-Configuration Isolation (Plug-and-Play)**:
-   All database files, vector spaces, and sync status files are stored directly inside the target codebase's local hidden folder (`.graphrag_data/`). No centralized databases to manage or conflict.
-   
-2. **Rich AST Call-Graph Parser**:
-   Uses **Tree-Sitter** to parse Python, PHP, JavaScript, TypeScript, JSX, and TSX files. It extracts class/function syntax structures, docstrings, complexity, inputs, outputs, decorators, and builds exact function call relationships.
-
-3. **ChromaDB Storage & Dimension Optimization**:
-   Omit raw codebase source code strings from ChromaDB entirely to prevent database bloating. Uses an optimized 512-dimension vector embedding configuration. Search result descriptions are dynamically reconstructed on the fly using a single batched database lookup to Neo4j.
-
-4. **Dynamic Code Retrieval & Drift Recovery**:
-   Instead of cache-bloating Neo4j with full source code copies, it maps functions and classes to exact line coordinates and an `anchor` string fingerprint. The system loads code dynamically on-demand from disk, with an auto-recovery parser that updates coordinates in Neo4j if line numbers shift due to codebase edits.
-
-5. **Dynamic Import & Dependency Analyzer**:
-   Tracks module import statements (`File -[:IMPORTS]-> Module`). Automatically detects Python standard library modules dynamically (using `sys.stdlib_module_names` in Python 3.10+ with local fallback) to cleanly categorize dependencies as *stdlib*, *external*, or *internal*.
-
-6. **Git Commit-to-Function Line Mapper**:
-   Tracks Git history, parses unified git diff hunks to retrieve exact line changes, and maps commits directly to the specific functions they modified (`Commit -[:CHANGED]-> Function`) using overlapping line ranges. Great for feeding Test Impact Analysis agents!
-
-7. **Self-Correction LLM Extraction Loop**:
-   Resolves common LLM JSON syntax errors by integrating `json-repair`. If parsing still fails or keys are missing, the system starts a self-correction feedback loop, feeding the incorrect text and error trace back to the LLM to rewrite the output (retrying up to 4 attempts).
-
-8. **Robust Startup Handshake**:
-   Uses connection polling (`_wait_for_neo4j()`) instead of static timeouts, ensuring that dockerized databases are fully initialized and Bolt handshake is ready before building indexes.
-
-9. **Direct Python Module Interface**:
-   Exposes a clean, state-free, programmatic Python API (`knowledge_base.py`) for autonomous agents to plan, query, and synchronize test generation tasks in-process.
+* 🧬 **AST Call-Graph Parser**: Powered by **Tree-Sitter** to parse Python, PHP, JavaScript, and TypeScript/JSX/TSX. It extracts classes, functions, complexity, input signatures, return types, raises, and constructs precise call relationships.
+* 📦 **Dynamic Import & Dependency Tracker**: Maps module imports (`File -[:IMPORTS]-> Module`). Automatically distinguishes standard library, external packages, and internal project dependencies.
+* 🌿 **Git Commit-to-Function Mapper**: Parses Git commit diffs to link modified lines directly to the specific functions they affected (`Commit -[:CHANGED]-> Function`), enabling precise Test Impact Analysis.
+* 🔍 **Hybrid Vector-Graph Queries**: Combines vector database semantic similarity searches (ChromaDB) with graph relation expansions (Neo4j) to synthesis comprehensive multi-layered context.
+* 🔄 **Git Hooks Auto-Sync**: Integrates post-commit and pre-push hooks to automatically run incremental synchronizations, ensuring the graph never becomes stale.
+* 🛠️ **Self-Healing LLM Extraction**: Combines `json-repair` with a self-correction feedback loop. If the LLM generates malformed JSON metadata, the system automatically feeds the errors back to the LLM to self-heal and regenerate (up to 4 retries).
+* 📊 **Interactive Force-Directed Dashboard**: Launch a local web explorer (`nelgraph viz`) with optimized layout physics (node collision protection, charge range limits) to visually map and filter classes, functions, files, communities, and test coverage.
 
 ---
 
-## 🛠️ Tech Stack
+## 🛠️ Technology Stack
 
-* **Core**: Python 3.10+
-* **Parsing**: Tree-Sitter (Python, PHP, TS, JS)
-* **Graph DB**: Neo4j (Bolt protocol)
-* **Vector DB**: ChromaDB
-* **LLM / Embeddings**: DeepSeek V4-Flash & OpenAI Embeddings via OpenRouter
+* **Parsing**: Tree-Sitter (Python, PHP, JS, TS)
+* **Graph Database**: Neo4j (Bolt Protocol, Dockerized)
+* **Vector Database**: ChromaDB (Flat Vector Indexing)
+* **LLM Engine**: DeepSeek V4-Flash & OpenAI Text Embeddings via OpenRouter
 * **Visualization Backend**: FastAPI (Uvicorn)
-* **Visualization Frontend**: React (`react-force-graph-2d` & D3)
+* **Visualization Frontend**: React (Vite) + `react-force-graph-2d` + D3 Force
 
 ---
 
@@ -51,92 +61,164 @@ An autonomous, zero-configuration Knowledge Graph builder and semantic search en
 
 ```text
 D:\GraphRAG/
-├── config.py                 # System configuration and environment loader
-├── docker-compose.yml        # Multi-container orchestration (Neo4j)
-├── start_all.bat             # 1-Click launcher script for Windows developers
-├── Makefile                  # Shortcut commands for orchestration & execution
-├── .env                      # Local environment configurations (ignored in git)
-├── initialize_graph.py       # CLI wrapper for full init / incremental sync
-├── knowledge_base.py         # Python module interface for autonomous agents
-├── core/                     # Core init & sync pipelines implementation
-├── parsers/                  # Code and Git history parsers (base & php specific)
-├── extractors/               # Entity extractors and AI Testing Enricher
+├── config.py                 # System config and environment loader
+├── docker-compose.yml        # Docker orchestration for local Neo4j
+├── start_all.bat             # 1-Click developer launcher for Windows
+├── Makefile                  # Cross-platform orchestration tasks
+├── initialize_graph.py       # CLI wrapper for ingestion & sync
+├── knowledge_base.py         # Python programmatic API for AI agents
+├── core/                     # Core synchronization & database pipelines
+├── parsers/                  # Code AST and Git history parsers
+├── extractors/               # AI metadata extraction & enrichment loops
 ├── community/                # Graph clustering and community summarization
 ├── query/                    # Hybrid search and context synthesis engine
-├── updater/                  # Filesystem Watcher and Git Hooks
-├── visualization/            # FastAPI Backend & React Frontend Dashboard (Visualizer)
+├── updater/                  # Filesystem watcher & Git hook scripts
+├── visualization/            # FastAPI + React visualization dashboard
 ├── mcp/                      # Model Context Protocol TS/JS server
-└── docs/                     # Documentation and integration guides
-    ├── USAGE.md              # Quick usage guide for knowledge_base.py
-    ├── INTEGRATION_GUIDE.md  # Detailed Vietnamese integration guide
-    ├── architecture.md       # High-level architecture documentation
-    ├── agent_design_guide.md # Integration guide for test generation agents
-    ├── api_sufficiency.md   # Evaluation of Python API sufficiency for agents
-    └── graphrag-level3.md    # Deployment guide for all building phases
+└── docs/                     # Comprehensive documentation & architecture references
 ```
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Installation & Setup
 
-### 1. Configure Environment
-Create a `.env` file in this directory (you can copy `.env.example`):
-```env
-# OpenRouter API Key (required for LLM & Embeddings)
-OPENROUTER_API_KEY=sk-or-v1-xxxxxxxx...
+### 1. Prerequisites
+- **Python 3.10+**
+- **Docker Desktop** (running and configured)
+- **Node.js 18+** (only if building/developing visualization frontend)
 
-# Path to the target codebase you want to analyze (relative or absolute)
-CODEBASE_PATH=../my-target-project
-```
-
-### 2. Run Ingestion / Synchronization
-
-You can run the main script directly, or use the provided **Makefile** / **Windows Launcher**:
-
-#### Option A: Using Makefile (Cross-Platform)
+### 2. Standard Installation
+Install the package directly from PyPI:
 ```bash
-make up           # Start Neo4j container in background
-make init         # Auto-detect: perform full initialization or incremental sync
-make force-init   # Wipe database and perform full re-ingestion
-make status       # Inspect current database metrics & status
-make hook         # Install post-commit hook manually
-make down         # Stop Neo4j container
+pip install nelgraph
 ```
 
-#### Option B: Using Windows Launcher
-Double-click `start_all.bat` (which starts Neo4j database, Backend API, Frontend Explorer, and Watcher) or run:
+### 3. Local Development Setup
+Clone the repository and install packages:
 ```bash
-python initialize_graph.py
+git clone https://github.com/anhluong447/GraphDB-Initialize.git D:\GraphRAG
+cd D:\GraphRAG
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -e ./nelgraph
 ```
-*Tip: On the first run, this script will automatically create a quick-run wrapper (`run_graphrag.bat` on Windows or `run_graphrag.sh` on Unix) in your target codebase root so you can trigger updates without leaving your project directory.*
 
 ---
 
-## 🔌 Programmatic Python Integration API (`knowledge_base.py`)
+## 💻 CLI Command Reference
 
-You can import the module directly into your local scripts/test agents to query the codebase knowledge base:
+Execute commands from your terminal:
+
+```bash
+nelgraph init            # 1. First-time setup: launches Neo4j container, parses code, embeds and enriches codebase
+nelgraph sync            # 2. Performs incremental sync to index changes since last synced commit
+nelgraph sync --silent   # Run synchronization silently (ideal for git hooks)
+nelgraph status          # 3. View current DB metrics, function counts, and enrichment coverage
+nelgraph install-hook    # 4. Install post-commit hooks for automatic graph synchronization
+nelgraph viz             # 5. Launch the local interactive visualization dashboard at http://localhost:8080
+```
+
+---
+
+## 🔌 Programmatic Python API
+
+Import `nelgraph` to query your codebase programmatically:
 
 ```python
-from knowledge_base import get_snapshot, get_function_context, mark_tested
+import nelgraph
 
-# 1. Get snapshot of prioritized functions needing tests
-snapshot = get_snapshot()
-for comm in snapshot['communities']:
-    print(f"Community: {comm['name']}")
-    for func in comm['functions']:
-        print(f"  - {func['name']} (Priority: {func['priority_score']})")
+# 1. Optional configuration (fallback to local .env if not specified)
+nelgraph.configure(
+    codebase_path="/absolute/path/to/project",
+    openrouter_api_key="your-openrouter-api-key"
+)
 
-# 2. Retrieve context (source code, calling graph, test specs) for a function
-ctx = get_function_context("process_payment")
-print(ctx["function"]["raw_code"])
-print(ctx["function"]["edge_cases"])
+# 2. Orient: Get high-level overview of codebase grouped by community clusters
+snapshot = nelgraph.get_snapshot()
+print(f"Total indexed functions: {snapshot['total']}")
+for comm in snapshot["communities"]:
+    print(f"Cluster: {comm['name']} - {comm['summary'][:100]}...")
 
-# 3. Mark function as verified
-mark_tested("process_payment")
+# 3. Search: Retrieve relevant functions via semantic vector similarity
+search_results = nelgraph.search("database connection handling", top_k=5)
+for res in search_results:
+    print(f"Match: {res['name']} in {res['file']} (Score: {res['score']})")
+
+# 4. Retrieve Context: Get full signatures, calls, test plans, and raw source
+ctx = nelgraph.get_function_context("execute", class_name="OrderProcessor")
+print("Source Code:\n", ctx["raw_code"])
+print("Parameters Input:", ctx["inputs"])
+print("Test Recommendations:", ctx["test_recommendations"])
+print("Exceptions Raised:", ctx["raises"])
+print("Callers (Blast Radius):", ctx["callers"])
+
+# 5. Retrieve Class: Get class hierarchy, parent classes, and child methods
+class_ctx = nelgraph.get_class_context("BaseController")
+print("Parent classes:", class_ctx["parent_classes"])
+print("Class methods:", class_ctx["methods"])
+
+# 6. Save Context: Export large context files to bypass terminal encoding limits on Windows
+nelgraph.dump_context_to_file("execute", "context_export.md", format="markdown")
+
+# 7. Mark Tested: Persist unit test completion status directly into Neo4j
+nelgraph.mark_tested("execute", file="src/processors/order.py")
 ```
 
-For more details on integration, please refer to:
-* 📖 [Quick Usage Guide](file:///D:/GraphRAG/docs/USAGE.md)
-* 📖 [Vietnamese Integration Guide](file:///D:/GraphRAG/docs/INTEGRATION_GUIDE.md)
-* 📖 [Agent Integration Guide](file:///D:/GraphRAG/docs/agent_design_guide.md)
-* 📖 [Architecture Reference](file:///D:/GraphRAG/docs/architecture.md)
+---
+
+## 📊 Interactive Visualization Dashboard
+
+Launch the visual explorer:
+```bash
+nelgraph viz
+```
+This starts a FastAPI backend and loads the React dashboard at `http://localhost:8080`.
+
+### Physical Layout Optimizations
+To ensure complex codebases are easy to explore, the visualizer uses customized D3 force simulations:
+* **Anti-Overlap Collision**: Integrates `forceCollide` representing nodes as physical circles with safety margins (`radius + 14px`). Node labels and icons never overlap.
+* **Compact Peripheries**: Restricts many-body repulsion (`charge`) to a maximum radius using `distanceMax(250)`. This prevents disconnected files and external libraries from floating away into infinity, keeping them compactly structured around the main clusters.
+* **Stretched Clusters**: Adjusts default link distances to `80px`, spreading out highly connected clusters for clean visibility.
+
+---
+
+## 🧪 Automated Testing Environment
+
+The workspace includes a complete testing setup for both Frontend (React) and Backend (FastAPI).
+
+### 1. Frontend UI Tests
+Uses **Vitest** + **React Testing Library** + **jsdom** to test React components.
+- **Location**: `nelgraph/nelgraph/visualization/frontend/`
+- **Execution**:
+  ```bash
+  cd nelgraph/nelgraph/visualization/frontend
+  npm run test          # Run once
+  npm run test:watch    # Run in watch mode
+  ```
+- **Test Coverage**:
+  - `DetailPanel.test.jsx`: Verifies metadata cards, list rendering of complex JSON structures (resolves Error 31), and chip navigations.
+  - `GraphView.test.jsx`: Mocks canvas elements, tests filter switching, and verifies filtering out dangling links.
+  - `ErrorBoundary.test.jsx`: Verifies rendering fallback panels and sending POST error logs to the API.
+
+### 2. Backend Integration Tests
+Uses **pytest** to verify FastAPI API routes.
+- **Location**: `nelgraph/tests/`
+- **Execution**:
+  ```bash
+  cd nelgraph
+  pytest -v tests/
+  ```
+- **Test Coverage**:
+  - `conftest.py`: Configures `mock_neo4j` fixture to intercept `get_client` calls, bypassing live database requirements.
+  - `test_api.py`: Validates `/status`, `/log`, `/node/{name}`, `/node/{name}/mark_tested`, and checks dangling edge filtering in `/graph/full`.
+
+---
+
+## 🤖 Agent Skill Integration
+
+When `nelgraph init` runs, it generates `.agents/nelgraph/SKILL.md`. This file contains strict instructions, workflows, and API descriptions that downstream LLM coding agents can load. Agents reading this file are instructed to:
+1. Always run synchronization (`nelgraph.run_sync()`) before taking actions.
+2. Read overall project structure via `get_snapshot()` rather than scanning directory trees.
+3. Query source code via `get_function_context()["raw_code"]` instead of opening files directly.
+4. Inspect `ctx["callers"]` to calculate change blast radii before refactoring.
+5. Use `test_recommendations` as a baseline blueprint for test writing.
