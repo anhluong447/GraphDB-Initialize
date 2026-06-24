@@ -98,6 +98,142 @@ def generate_tests(req: TestGenRequest):
     return {"task_id": task_id, "status": "running"}
 
 
+class BulkGenRequest(BaseModel):
+    mode: str = "unit"
+
+@app.post("/generate_tests/all")
+def generate_tests_all(req: BulkGenRequest):
+    """Trigger bulk test generation for all untested functions in the background."""
+    client = get_client()
+    try:
+        result = client.run("""
+            MATCH (f:Function)
+            WHERE f.tested IS NULL OR f.tested = false
+            OPTIONAL MATCH (f)-[:BELONGS_TO]->(c:Community)
+            RETURN f.name as name, f.file as file, f.class_name as class_name,
+                   f.complexity as complexity, c.id as community_id
+            ORDER BY f.complexity DESC
+        """)
+        rows = [dict(r) for r in result]
+    except Exception as e:
+        logger.error(f"Error querying untested functions from Neo4j: {e}", exc_info=True)
+        return {"error": f"Failed to retrieve functions: {e}"}
+
+    if not rows:
+        return {"status": "done", "message": "All functions are already tested."}
+
+    task_id = str(uuid.uuid4())[:8]
+    _test_tasks[task_id] = {
+        "status": "running",
+        "progress": {"done": 0, "total": len(rows), "current": "Commander planning batch..."},
+        "results": [],
+        "bugs_found": [],
+        "started_at": time.strftime("%H:%M:%S")
+    }
+
+    def _run():
+        try:
+            from nelgraph.core.bulk_orchestrator import BulkTestOrchestrator
+            orchestrator = BulkTestOrchestrator(functions=rows, mode=req.mode)
+            
+            def update_progress(progress, results, bugs_found):
+                _test_tasks[task_id]["progress"] = progress
+                _test_tasks[task_id]["results"] = results
+                _test_tasks[task_id]["bugs_found"] = bugs_found
+
+            report = orchestrator.run(progress_callback=update_progress)
+            _test_tasks[task_id]["status"] = "done"
+            _test_tasks[task_id]["result"] = report
+        except Exception as e:
+            logger.error(f"BulkTestOrchestrator error: {e}", exc_info=True)
+            _test_tasks[task_id]["status"] = "error"
+            _test_tasks[task_id]["result"] = {"error": str(e), "log": []}
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    logger.info(f"Bulk test gen task {task_id} started for {len(rows)} functions, mode={req.mode}")
+    return {"task_id": task_id, "status": "running"}
+
+
+class IncrementalGenRequest(BaseModel):
+    changed_files: List[str]
+    mode: str = "unit"
+
+@app.post("/generate_tests/incremental")
+def generate_tests_incremental(req: IncrementalGenRequest):
+    """Trigger incremental test generation for changed files and their blast radius."""
+    client = get_client()
+    files = [f.replace("\\", "/") for f in req.changed_files]
+    
+    try:
+        # 1. Query functions belonging to changed files
+        result_fns = client.run("""
+            MATCH (fn:Function)
+            WHERE fn.file IN $files
+            OPTIONAL MATCH (fn)-[:BELONGS_TO]->(c:Community)
+            RETURN fn.name as name, fn.file as file, fn.class_name as class_name,
+                   fn.complexity as complexity, c.id as community_id
+        """, {"files": files})
+        fns = [dict(r) for r in result_fns]
+        
+        # 2. Query blast radius (callers of these functions)
+        result_callers = client.run("""
+            MATCH (caller:Function)-[:CALLS]->(fn:Function)
+            WHERE fn.file IN $files
+            OPTIONAL MATCH (caller)-[:BELONGS_TO]->(c:Community)
+            RETURN caller.name as name, caller.file as file, caller.class_name as class_name,
+                   caller.complexity as complexity, c.id as community_id
+        """, {"files": files})
+        callers = [dict(r) for r in result_callers]
+    except Exception as e:
+        logger.error(f"Error querying changed/blast-radius functions from Neo4j: {e}", exc_info=True)
+        return {"error": f"Failed to retrieve functions: {e}"}
+
+    # 3. Merge & Deduplicate functions
+    seen = set()
+    unique_fns = []
+    for f in fns + callers:
+        key = (f["name"], f.get("file"))
+        if key not in seen:
+            seen.add(key)
+            unique_fns.append(f)
+            
+    if not unique_fns:
+        return {"status": "done", "message": "No functions found to test for these files."}
+
+    task_id = str(uuid.uuid4())[:8]
+    _test_tasks[task_id] = {
+        "status": "running",
+        "progress": {"done": 0, "total": len(unique_fns), "current": "Commander planning batch..."},
+        "results": [],
+        "bugs_found": [],
+        "started_at": time.strftime("%H:%M:%S")
+    }
+
+    def _run():
+        try:
+            from nelgraph.core.bulk_orchestrator import BulkTestOrchestrator
+            orchestrator = BulkTestOrchestrator(functions=unique_fns, mode=req.mode)
+            
+            def update_progress(progress, results, bugs_found):
+                _test_tasks[task_id]["progress"] = progress
+                _test_tasks[task_id]["results"] = results
+                _test_tasks[task_id]["bugs_found"] = bugs_found
+
+            report = orchestrator.run(progress_callback=update_progress)
+            _test_tasks[task_id]["status"] = "done"
+            _test_tasks[task_id]["result"] = report
+        except Exception as e:
+            logger.error(f"Incremental BulkTestOrchestrator error: {e}", exc_info=True)
+            _test_tasks[task_id]["status"] = "error"
+            _test_tasks[task_id]["result"] = {"error": str(e), "log": []}
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    logger.info(f"Incremental test gen task {task_id} started for {len(unique_fns)} functions, mode={req.mode}")
+    return {"task_id": task_id, "status": "running"}
+
+
 @app.get("/task/{task_id}/status")
 def get_task_status(task_id: str):
     """Poll the status of a test generation task."""

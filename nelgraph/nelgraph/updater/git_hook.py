@@ -149,8 +149,29 @@ def update_changed_files(changed_files: list[str]):
             from nelgraph.community.summarizer import summarize_all_communities
             detect_communities()
             summarize_all_communities()
+            _trigger_incremental_tests(changed_files)
     finally:
         release_lock()
+
+
+def _trigger_incremental_tests(changed_files: list[str]):
+    """Fire-and-forget call to API after graph sync has finished."""
+    import requests
+    from nelgraph.config import VIZ_API_URL
+    try:
+        py_files = [f for f in changed_files if f.endswith(".py")]
+        if not py_files:
+            return
+        resp = requests.post(
+            f"{VIZ_API_URL}/generate_tests/incremental",
+            json={"changed_files": py_files, "mode": "unit"},
+            timeout=5,
+        )
+        if resp.ok:
+            print(f"[GitHook] Incremental test gen started: task_id={resp.json().get('task_id')}")
+    except Exception as e:
+        # Do not crash git hook under any circumstances
+        print(f"[GitHook] Could not trigger test generation (API offline?): {e}")
 
 
 def install_post_commit_hook() -> bool:

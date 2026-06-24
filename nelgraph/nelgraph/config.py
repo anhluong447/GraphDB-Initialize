@@ -98,3 +98,5 @@ LOCK_PATH = os.path.join(GRAPHRAG_DATA_DIR, ".nelgraph.lock").replace("\\", "/")
 # GitHub (optional)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "")  # format: "owner/repo"
+
+VIZ_API_URL = os.environ.get("NELGRAPH_VIZ_API_URL", "http://localhost:8080")

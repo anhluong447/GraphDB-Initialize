@@ -181,18 +181,20 @@ Write the COMPLETE fixed test file. Include all imports. Return ONLY code, no ma
 class TestAgent:
     """Autonomous dual-model test generation agent."""
 
-    def __init__(self, target: str, mode: str = "unit", file: str = None, class_name: str = None):
+    def __init__(self, target: str, mode: str = "unit", file: str = None, class_name: str = None, injected_plan: dict = None):
         """
         Args:
             target: Function name or community name to test.
             mode: "unit" | "integration" | "system"
             file: Optional file path for disambiguation.
             class_name: Optional class name for disambiguation.
+            injected_plan: Pre-computed plan to bypass Commander planning step.
         """
         self.target = target
         self.mode = mode
         self.file = file
         self.class_name = class_name
+        self.injected_plan = injected_plan
         self.plan = None
         self.generated_files = []
         self.test_results = []
@@ -217,8 +219,12 @@ class TestAgent:
             if not context:
                 return self._error_report("Could not find target in the knowledge graph.")
 
-            # Step 2: Commander plans strategy
-            self.plan = self._plan_strategy(context)
+            # Step 2: Commander plans strategy (or use injected plan)
+            if self.injected_plan:
+                self.log("Using injected test plan...")
+                self.plan = self.injected_plan
+            else:
+                self.plan = self._plan_strategy(context)
             if not self.plan:
                 return self._error_report("Commander failed to produce a test plan.")
 
