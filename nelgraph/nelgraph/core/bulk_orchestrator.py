@@ -190,90 +190,26 @@ RULES:
 
     def _worker_run_single(self, fn: dict) -> dict:
         """Run Worker to generate and self-heal test for a single function."""
-        self.log(f"Worker processing function: {fn['name']} (File: {fn.get('file')})")
+        self.log(f"Processing: {fn['name']} ({fn.get('file')})")
 
-        # 1. Find group from master plan
-        group = None
-        if self.master_plan and "groups" in self.master_plan:
-            for g in self.master_plan["groups"]:
-                if fn["name"] in g.get("functions", []):
-                    group = g
-                    break
-
-        # 2. Determine test file path
-        import os
-        file_path_raw = fn.get("file") or f"{fn['name']}.py"
-        base_name = os.path.basename(file_path_raw)
-        module_name = os.path.splitext(base_name)[0]
-        test_file_path = f"tests/test_{module_name}.py"
-
-        # 3. Build mocks
-        mocks = []
-        if group and "shared_mocks" in group:
-            for sm in group["shared_mocks"]:
-                mocks.append({
-                    "target": sm,
-                    "reason": "Shared mock from master plan",
-                    "mock_value": "None"
-                })
-
-        test_type = (group.get("test_type") if group else None) or self.mode
-
-        # 4. Construct injected plan
-        injected_plan = {
-            "strategy_summary": self.master_plan.get("strategy_summary", "Batch plan testing strategy"),
-            "test_files": [
-                {
-                    "file_path": test_file_path,
-                    "test_type": test_type,
-                    "target_functions": [fn["name"]],
-                    "mocks": mocks,
-                    "test_cases": [
-                        {
-                            "name": f"test_{fn['name']}_happy_path",
-                            "category": "happy",
-                            "description": f"Happy path verification for {fn['name']}",
-                            "inputs": "auto-generate",
-                            "expected": "auto-generate"
-                        },
-                        {
-                            "name": f"test_{fn['name']}_error_path",
-                            "category": "error",
-                            "description": f"Error/exception path handling for {fn['name']}",
-                            "inputs": "auto-generate",
-                            "expected": "auto-generate"
-                        },
-                        {
-                            "name": f"test_{fn['name']}_edge_case",
-                            "category": "edge",
-                            "description": f"Boundary/edge conditions for {fn['name']}",
-                            "inputs": "auto-generate",
-                            "expected": "auto-generate"
-                        }
-                    ]
-                }
-            ]
-        }
-
-        # 5. Initialize TestAgent with injected plan
+        # We do not inject a plan here anymore, so TestAgent can use its Planner layer
         agent = TestAgent(
             target=fn["name"],
-            mode=test_type,
+            mode=self.mode,
             file=fn.get("file"),
             class_name=fn.get("class_name"),
-            injected_plan=injected_plan,
-            bulk_mode=True
+            injected_plan=None,
         )
 
-        # 6. Run Agent (which runs Worker + Self-healing loop)
+        # Run Agent (which runs Planner -> Worker + Self-healing loop)
         report = agent.run()
 
-        # 7. Collect results
+        # Collect results
         if agent.bugs_found:
             self.bugs_found.extend(agent.bugs_found)
 
         success = report.get("success", False)
-        self.log(f"Function {fn['name']} test gen outcome: {'PASSED' if success else 'FAILED'}")
+        self.log(f"  -> {'PASSED' if success else 'FAILED'}: {fn['name']}")
 
         # If passed, mark tested in Neo4j
         if success:

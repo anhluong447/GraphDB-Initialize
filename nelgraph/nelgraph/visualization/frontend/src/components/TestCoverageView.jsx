@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
+import BulkReportDrawer from './BulkReportDrawer'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
@@ -26,6 +27,9 @@ export default function TestCoverageView({ status, onMarkTested, onGenerateTest 
       return null
     }
   })
+  
+  // Inspector state
+  const [inspectTaskId, setInspectTaskId] = useState(null)
 
   // Synchronize bulk states to localStorage
   useEffect(() => {
@@ -67,10 +71,11 @@ export default function TestCoverageView({ status, onMarkTested, onGenerateTest 
           }
         } else if (data.status === 'done') {
           setBulkStatus('done')
-          setBulkTaskId(null)
           if (data.result && data.result.summary) {
             setBulkSummary(data.result.summary)
           }
+          setInspectTaskId(bulkTaskId) // Auto popup report window!
+          setBulkTaskId(null)
           // Refresh untested list
           const res = await axios.get(`${API}/functions?tested=false&limit=200`)
           setUntested(res.data.data || [])
@@ -192,12 +197,31 @@ export default function TestCoverageView({ status, onMarkTested, onGenerateTest 
             <span style={{ fontWeight: 500, color: 'var(--color-success)', fontSize: 12 }}>✓ Bulk Test Generation Completed!</span>
             <button onClick={() => setBulkSummary(null)} style={{ border: 'none', background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer', fontSize: 14 }}>×</button>
           </div>
-          <div style={{ fontSize: 11, display: 'flex', gap: 16 }}>
+          <div style={{ fontSize: 11, display: 'flex', gap: 16, alignItems: 'center' }}>
             <span>Total: <strong>{bulkSummary.total}</strong></span>
             <span>Passed: <strong style={{ color: 'var(--color-success)' }}>{bulkSummary.passed}</strong></span>
             <span>Failed: <strong style={{ color: 'var(--color-danger)' }}>{bulkSummary.failed}</strong></span>
             {bulkSummary.skipped > 0 && <span>Skipped: <strong>{bulkSummary.skipped}</strong></span>}
-            {bulkSummary.bugs_found > 0 && <span>Bugs Found: <strong style={{ color: 'var(--color-danger)' }}>{bulkSummary.bugs_found}</strong></span>}
+            {bulkSummary.bugs_found > 0 && <span>Bugs: <strong style={{ color: 'var(--color-danger)' }}>{bulkSummary.bugs_found}</strong></span>}
+            <button 
+              onClick={() => setInspectTaskId('latest')} 
+              style={{
+                marginLeft: 'auto',
+                padding: '3px 8px',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--color-success)',
+                background: 'rgba(46, 204, 113, 0.15)',
+                color: 'var(--color-success)',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+            >
+              📋 Review Report
+            </button>
           </div>
         </div>
       )}
@@ -244,6 +268,11 @@ export default function TestCoverageView({ status, onMarkTested, onGenerateTest 
           ))
         )}
       </div>
+
+      {/* Bulk Report Drawer Modal */}
+      {inspectTaskId && (
+        <BulkReportDrawer taskId={inspectTaskId} onClose={() => setInspectTaskId(null)} />
+      )}
     </div>
   )
 }

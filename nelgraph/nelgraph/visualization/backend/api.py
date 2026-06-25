@@ -70,6 +70,129 @@ import uuid
 
 _test_tasks = {}  # In-memory task store: {task_id: {status, result, ...}}
 
+def _generate_fallback_markdown(report_json: dict) -> str:
+    summary = report_json.get("summary", {})
+    strategy = report_json.get("strategy", "")
+    lines = [
+        "# Bulk Test Generation Report",
+        "",
+        "## Summary",
+        f"- **Total Functions**: {summary.get('total', 0)}",
+        f"- **Passed**: {summary.get('passed', 0)}",
+        f"- **Failed**: {summary.get('failed', 0)}",
+        f"- **Skipped**: {summary.get('skipped', 0)}",
+        f"- **Bugs Found**: {summary.get('bugs_found', 0)}",
+        "",
+        "## Strategy",
+        strategy or "Fallback sequential unit testing.",
+        "",
+        "## Detailed Results",
+        "| Function | Status | Mocks / Notes | Files |",
+        "| --- | --- | --- | --- |"
+    ]
+    for r in report_json.get("results", []):
+        status = "SKIPPED" if r.get("skipped") else ("PASSED" if r.get("success") else "FAILED")
+        files = ", ".join(r.get("generated_files", [])) or "None"
+        lines.append(f"| `{r['target']}` | {status} | {r.get('error', '')} | {files} |")
+    return "\n".join(lines)
+
+
+def generate_markdown_report(report_json: dict) -> str:
+    summary = report_json.get("summary", {})
+    strategy = report_json.get("strategy", "")
+    
+    details = []
+    for r in report_json.get("results", []):
+        detail = {
+            "target": r.get("target"),
+            "success": r.get("success"),
+            "skipped": r.get("skipped"),
+            "error": r.get("error"),
+            "bugs": r.get("bugs_found"),
+            "files": r.get("generated_files"),
+            "failed_tests_count": sum(1 for t in r.get("test_results", []) if t.get("status") == "failed"),
+            "self_heal_attempts": len(r.get("heal_history", []))
+        }
+        if r.get("error"):
+            detail["error_snippet"] = str(r["error"])[:300]
+        failed_tests = [t for t in r.get("test_results", []) if t.get("status") == "failed"]
+        if failed_tests:
+            detail["failure_message"] = failed_tests[0].get("message", "")[:300]
+        details.append(detail)
+
+    prompt = f"""You are a QA Lead. You need to compile a beautiful, professional, and comprehensive markdown report summarizing a batch test generation run.
+Below is the execution metadata:
+
+## Overview Stats
+- Total Functions: {summary.get("total", 0)}
+- Passed Tests: {summary.get("passed", 0)}
+- Failed Tests: {summary.get("failed", 0)}
+- Skipped: {summary.get("skipped", 0)}
+- Bugs Discovered: {summary.get("bugs_found", 0)}
+
+## Master Strategy (Commander)
+{strategy}
+
+## Function Run Details
+{json.dumps(details, indent=2)}
+
+## Task
+Produce a professional, clean Markdown report (`report.md`) detailing the bulk test generation results.
+Your report should include:
+1. An Executive Summary (using bold callouts and high-level assessment).
+2. A summary table of all processed functions, showing target name, status (Success/Failed/Skipped), number of self-healing attempts, and generated files.
+3. Detailed breakdown of any failures or errors (with actionable troubleshooting suggestions).
+4. Highlighted bugs/defects found during generation.
+5. Overall quality recommendation for the codebase.
+
+Be concise, structured, and use standard GitHub Markdown layout (emojis, tables, warning/note blocks).
+Do not wrap your output in markdown code blocks like ```markdown. Output the raw markdown content directly.
+"""
+    try:
+        from nelgraph.core.test_agent import _get_planner, _cfg
+        cfg = _cfg()
+        response = _get_planner().chat.completions.create(
+            model=cfg.PLANNER_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=4000,
+            timeout=120.0
+        )
+        content = response.choices[0].message.content
+        if content:
+            return content.strip()
+    except Exception as e:
+        logger.error(f"Error calling LLM to generate markdown report: {e}", exc_info=True)
+    
+    return _generate_fallback_markdown(report_json)
+
+
+def save_and_generate_report(task_id: str, report: dict):
+    try:
+        reports_dir = os.path.join(GRAPHRAG_DATA_DIR, "reports")
+        os.makedirs(reports_dir, exist_ok=True)
+        
+        # Save JSON
+        report_path = os.path.join(reports_dir, f"bulk_report_{task_id}.json")
+        latest_path = os.path.join(GRAPHRAG_DATA_DIR, "bulk_report_latest.json")
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        with open(latest_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        logger.info(f"Saved bulk test report JSON to {report_path} and bulk_report_latest.json")
+        
+        # Save MD
+        md_report = generate_markdown_report(report)
+        md_report_path = os.path.join(reports_dir, f"bulk_report_{task_id}.md")
+        md_latest_path = os.path.join(GRAPHRAG_DATA_DIR, "bulk_report_latest.md")
+        with open(md_report_path, "w", encoding="utf-8") as f:
+            f.write(md_report)
+        with open(md_latest_path, "w", encoding="utf-8") as f:
+            f.write(md_report)
+        logger.info(f"Saved bulk test report MD to {md_report_path} and bulk_report_latest.md")
+    except Exception as re:
+        logger.error(f"Failed to save bulk test report: {re}", exc_info=True)
+
+
 class TestGenRequest(BaseModel):
     target: str
     mode: str = "unit"
@@ -144,21 +267,7 @@ def generate_tests_all(req: BulkGenRequest):
             report = orchestrator.run(progress_callback=update_progress)
             _test_tasks[task_id]["status"] = "done"
             _test_tasks[task_id]["result"] = report
-
-            # Save report to disk
-            try:
-                reports_dir = os.path.join(GRAPHRAG_DATA_DIR, "reports")
-                os.makedirs(reports_dir, exist_ok=True)
-                report_path = os.path.join(reports_dir, f"bulk_report_{task_id}.json")
-                latest_path = os.path.join(GRAPHRAG_DATA_DIR, "bulk_report_latest.json")
-                
-                with open(report_path, "w", encoding="utf-8") as f:
-                    json.dump(report, f, indent=2, ensure_ascii=False)
-                with open(latest_path, "w", encoding="utf-8") as f:
-                    json.dump(report, f, indent=2, ensure_ascii=False)
-                logger.info(f"Saved bulk test report to {report_path} and bulk_report_latest.json")
-            except Exception as re:
-                logger.error(f"Failed to save bulk test report to disk: {re}", exc_info=True)
+            save_and_generate_report(task_id, report)
 
         except Exception as e:
             logger.error(f"BulkTestOrchestrator error: {e}", exc_info=True)
@@ -182,7 +291,6 @@ def generate_tests_incremental(req: IncrementalGenRequest):
     files = [f.replace("\\", "/") for f in req.changed_files]
     
     try:
-        # 1. Query functions belonging to changed files
         result_fns = client.run("""
             MATCH (fn:Function)
             WHERE fn.file IN $files
@@ -192,7 +300,6 @@ def generate_tests_incremental(req: IncrementalGenRequest):
         """, {"files": files})
         fns = [dict(r) for r in result_fns]
         
-        # 2. Query blast radius (callers of these functions)
         result_callers = client.run("""
             MATCH (caller:Function)-[:CALLS]->(fn:Function)
             WHERE fn.file IN $files
@@ -205,7 +312,6 @@ def generate_tests_incremental(req: IncrementalGenRequest):
         logger.error(f"Error querying changed/blast-radius functions from Neo4j: {e}", exc_info=True)
         return {"error": f"Failed to retrieve functions: {e}"}
 
-    # 3. Merge & Deduplicate functions
     seen = set()
     unique_fns = []
     for f in fns + callers:
@@ -239,6 +345,7 @@ def generate_tests_incremental(req: IncrementalGenRequest):
             report = orchestrator.run(progress_callback=update_progress)
             _test_tasks[task_id]["status"] = "done"
             _test_tasks[task_id]["result"] = report
+            save_and_generate_report(task_id, report)
         except Exception as e:
             logger.error(f"Incremental BulkTestOrchestrator error: {e}", exc_info=True)
             _test_tasks[task_id]["status"] = "error"
@@ -257,6 +364,36 @@ def get_task_status(task_id: str):
     if not task:
         return {"error": "Task not found"}
     return task
+
+
+@app.get("/task/{task_id}/report")
+def get_task_report(task_id: str):
+    """Retrieve the markdown report for a task. Support 'latest' as task_id."""
+    if task_id == "latest":
+        report_path = os.path.join(GRAPHRAG_DATA_DIR, "bulk_report_latest.md")
+    else:
+        reports_dir = os.path.join(GRAPHRAG_DATA_DIR, "reports")
+        report_path = os.path.join(reports_dir, f"bulk_report_{task_id}.md")
+        
+    if not os.path.exists(report_path):
+        json_path = os.path.join(GRAPHRAG_DATA_DIR, "bulk_report_latest.json") if task_id == "latest" else os.path.join(reports_dir, f"bulk_report_{task_id}.json")
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    report_json = json.load(f)
+                md_report = generate_markdown_report(report_json)
+                with open(report_path, "w", encoding="utf-8") as f:
+                    f.write(md_report)
+                return {"markdown": md_report}
+            except Exception as e:
+                return {"error": f"Failed to generate report: {e}"}
+        return {"error": "Report not found"}
+        
+    try:
+        with open(report_path, "r", encoding="utf-8") as f:
+            return {"markdown": f.read()}
+    except Exception as e:
+        return {"error": f"Failed to read report: {e}"}
 
 
 class TestRunRequest(BaseModel):

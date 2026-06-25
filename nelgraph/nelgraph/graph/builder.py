@@ -61,7 +61,8 @@ def build_file_nodes(parsed_files: list[dict]):
                     n.raises = $raises,
                     n.annotations = $annotations,
                     n.superclasses = $superclasses,
-                    n.is_test = $is_test
+                    n.is_test = $is_test,
+                    n.complexity = $complexity
             """, {
                 "name": node["name"],
                 "file": node["file"],

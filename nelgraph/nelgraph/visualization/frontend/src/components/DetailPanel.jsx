@@ -224,15 +224,32 @@ function parseList(val) {
 
 function renderListItem(item) {
   if (!item) return ''
-  if (typeof item === 'object') {
-    const parts = []
-    const typeOrPath = item.type || item.path
-    if (typeOrPath) parts.push(`[${typeOrPath}] `)
-    if (item.name) parts.push(`${item.name}: `)
-    parts.push(item.description || item.summary || JSON.stringify(item))
-    return parts.join('')
+  if (typeof item !== 'object') return String(item)
+
+  // test_case item: {type, name, path, description}
+  if (item.type === 'test_case' || item.name) {
+    const tag = item.type || item.path || ''
+    const label = item.name || ''
+    const desc = typeof item.description === 'string'
+      ? item.description
+      : (item.description ? JSON.stringify(item.description) : '')
+    const summary = item.summary || ''
+    return [tag && `[${tag}]`, label && `${label}:`, desc || summary]
+      .filter(Boolean).join(' ')
   }
-  return String(item)
+
+  // mock item: {type, target, reason}
+  if (item.type === 'mock' || item.target) {
+    const label = item.target || ''
+    const reason = typeof item.reason === 'string' ? item.reason : ''
+    return [`[mock]`, label, reason && `— ${reason}`].filter(Boolean).join(' ')
+  }
+
+  // fallback: flatten tất cả values thành string
+  return Object.values(item)
+    .map(v => (v && typeof v === 'object') ? JSON.stringify(v) : String(v ?? ''))
+    .filter(Boolean)
+    .join(' ')
 }
 
 function getBadgeStyle(type) {

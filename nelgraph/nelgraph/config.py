@@ -64,9 +64,10 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-large")
 EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "512"))
 ENRICH_MIN_COMPLEXITY = int(os.getenv("ENRICH_MIN_COMPLEXITY", "2"))
 
-# TestAgent — dual-model autonomous test generation
+# TestAgent — 3-layer autonomous test generation
 COMMANDER_MODEL = os.getenv("COMMANDER_MODEL", "deepseek/deepseek-r1")
-WORKER_MODEL = os.getenv("WORKER_MODEL", "qwen/qwen3-coder-next")
+PLANNER_MODEL = os.getenv("PLANNER_MODEL", "deepseek/deepseek-v4-flash")
+WORKER_MODEL = os.getenv("WORKER_MODEL", "qwen/qwen-2.5-coder-32b-instruct")
 TEST_FRAMEWORK = os.getenv("TEST_FRAMEWORK", "pytest")  # pytest | jest | vitest
 MAX_HEAL_RETRIES = int(os.getenv("MAX_HEAL_RETRIES", "3"))
 

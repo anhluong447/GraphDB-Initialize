@@ -31,6 +31,7 @@ def _cfg():
 
 # ─── OpenRouter client singletons ──────────────────────────────────────────
 _commander_client = None
+_planner_client = None
 _worker_client = None
 
 
@@ -43,6 +44,17 @@ def _get_commander():
             base_url=cfg.OPENROUTER_BASE_URL,
         )
     return _commander_client
+
+
+def _get_planner():
+    global _planner_client
+    if _planner_client is None:
+        cfg = _cfg()
+        _planner_client = openai.OpenAI(
+            api_key=cfg.OPENROUTER_API_KEY,
+            base_url=cfg.OPENROUTER_BASE_URL,
+        )
+    return _planner_client
 
 
 def _get_worker():
@@ -77,7 +89,7 @@ def _save_registry(registry: dict):
 
 
 # ─── Prompts ────────────────────────────────────────────────────────────────
-PLANNER_PROMPT = """You are an expert QA architect. You have access to a codebase knowledge graph.
+COMMANDER_PLANNER_PROMPT = """You are an expert QA architect. You have access to a codebase knowledge graph.
 Your task is to create a detailed test strategy for the target function(s).
 
 ## Target Information
@@ -112,6 +124,73 @@ RULES:
 - Return ONLY valid JSON, no markdown fences.
 """
 
+FUNCTION_PLANNER_PROMPT = """You are an expert QA planner. Your task is to create a detailed,
+executable test plan for a single function, based on its source code and graph context.
+
+## Function Context
+{context_block}
+
+## Error Feedback (if this is a re-plan after a test failure)
+{error_feedback}
+
+## Task
+Produce a JSON test plan with EXACTLY this structure:
+{{
+  "strategy_summary": "Brief description of approach",
+  "test_files": [
+    {{
+      "file_path": "tests/test_<module>.py",
+      "test_type": "unit|integration|system",
+      "target_functions": ["function_name"],
+      "mocks": [
+        {{"target": "exact.import.path.to.mock", "reason": "why mock", "mock_value": "return value"}}
+      ],
+      "test_cases": [
+        {{
+          "name": "test_case_name",
+          "category": "happy|error|edge",
+          "description": "Exactly what to test",
+          "inputs": "concrete example inputs with real values",
+          "expected": "concrete expected output or exception"
+        }}
+      ]
+    }}
+  ]
+}}
+
+RULES:
+- mock.target must be the EXACT import path as used in the source code (e.g. "myapp.db.session.get")
+- inputs and expected must be CONCRETE values, not "auto-generate"
+- If there is error_feedback, adjust the strategy — do not repeat the failed approach.
+- Return ONLY valid JSON, no markdown fences.
+"""
+
+HEAL_PLANNER_PROMPT = """You are an expert QA planner reviewing a failed test.
+A Worker generated test code based on your previous plan, but it failed.
+Your job is to analyze the failure and produce a REVISED test plan.
+
+## Original Source Code
+{source_code}
+
+## Previous Test Plan
+{previous_plan}
+
+## Failed Test Code
+{test_code}
+
+## Error Output
+{error_output}
+
+## Task
+Diagnose WHY the test failed (wrong mock path, wrong assertion, import error, real bug, etc.)
+Then produce a REVISED plan in the same JSON structure as before.
+
+If diagnosis is "real_bug" — set "real_bug": true at top level and explain in strategy_summary.
+Otherwise — fix the plan so Worker can write correct test code.
+
+Return ONLY valid JSON, no markdown fences.
+"""
+
 GENERATOR_PROMPT = """You are an expert test code writer. Write complete, runnable test code based on this plan.
 
 ## Test Plan
@@ -132,74 +211,12 @@ RULES:
 - Return ONLY the Python/JS code, no markdown fences, no explanations.
 """
 
-DIAGNOSIS_PROMPT = """You are an expert debugging engineer. A generated test has failed.
-Analyze the failure and determine the root cause.
-
-## Original Source Code
-{source_code}
-
-## Generated Test Code
-{test_code}
-
-## Error Output
-{error_output}
-
-## Task
-Determine if the failure is caused by:
-1. INCORRECT TEST CODE (wrong mock, wrong assertion, import error, syntax error)
-2. REAL BUG in the source code (the test correctly caught a defect)
-
-Respond with EXACTLY this JSON:
-{{
-  "diagnosis": "test_error" | "real_bug",
-  "explanation": "Clear explanation of what went wrong",
-  "fix_instructions": "Specific instructions for fixing the test code (if diagnosis is test_error) or description of the bug (if diagnosis is real_bug)"
-}}
-
-Return ONLY valid JSON, no markdown.
-"""
-
-FIX_PROMPT = """You are an expert test code fixer. Fix the following test code based on the diagnosis.
-
-## Original Source Code
-{source_code}
-
-## Current Test Code (has errors)
-{test_code}
-
-## Error Output
-{error_output}
-
-## Diagnosis & Fix Instructions
-{fix_instructions}
-
-Write the COMPLETE fixed test file. Include all imports. Return ONLY code, no markdown fences.
-"""
-
-BULK_FIX_PROMPT = """You are an expert test code fixer. A generated test file has failed.
-Analyze the source code, the existing test code, and the test execution error log, and output a corrected version of the test code.
-
-Do not change the source code. Only fix the test code.
-
-## Original Source Code
-{source_code}
-
-## Current Test Code (has errors)
-{test_code}
-
-## Error Output
-{error_output}
-
-Please fix any issues (such as incorrect mocks, imports, assertions, or syntax errors) and return the COMPLETE updated test code.
-Respond ONLY with the code inside a python code block (```python ... ```) or plain text. Do not include any explanations.
-"""
-
 
 # ─── TestAgent ──────────────────────────────────────────────────────────────
 class TestAgent:
     """Autonomous dual-model test generation agent."""
 
-    def __init__(self, target: str, mode: str = "unit", file: str = None, class_name: str = None, injected_plan: dict = None, bulk_mode: bool = False):
+    def __init__(self, target: str, mode: str = "unit", file: str = None, class_name: str = None, injected_plan: dict = None):
         """
         Args:
             target: Function name or community name to test.
@@ -207,14 +224,12 @@ class TestAgent:
             file: Optional file path for disambiguation.
             class_name: Optional class name for disambiguation.
             injected_plan: Pre-computed plan to bypass Commander planning step.
-            bulk_mode: If True, bypasses Commander diagnosis to save tokens.
         """
         self.target = target
         self.mode = mode
         self.file = file
         self.class_name = class_name
         self.injected_plan = injected_plan
-        self.bulk_mode = bulk_mode
         self.plan = None
         self.generated_files = []
         self.test_results = []
@@ -245,9 +260,9 @@ class TestAgent:
                 self.log("Using injected test plan...")
                 self.plan = self.injected_plan
             else:
-                self.plan = self._plan_strategy(context)
+                self.plan = self._plan_function(context)
             if not self.plan:
-                return self._error_report("Commander failed to produce a test plan.")
+                return self._error_report("Planner failed to produce a test plan.")
 
             # Step 3: Worker generates test code
             generated = self._generate_tests(context)
@@ -352,7 +367,7 @@ class TestAgent:
 
         context_block = self._format_context_for_prompt(context)
 
-        prompt = PLANNER_PROMPT.format(context_block=context_block)
+        prompt = COMMANDER_PLANNER_PROMPT.format(context_block=context_block)
 
         try:
             response = _get_commander().chat.completions.create(
@@ -391,11 +406,106 @@ class TestAgent:
             self.log(f"Commander error: {e}")
             return None
 
-    # ─── STEP 3: Worker generates test code ────────────────────────────
-    def _generate_tests(self, context: dict) -> list:
-        """Worker (Qwen3 Coder Next) writes test code from the plan."""
-        self.log("Worker is generating test code...")
+    def _plan_function(self, context: dict, error_feedback: str = "") -> Optional[dict]:
+        """Planner (V4 Flash) reads source + graph context and produces detailed per-function plan."""
+        self.log("Planner reading context and generating detailed test plan...")
         cfg = _cfg()
+        context_block = self._format_context_for_prompt(context)
+
+        prompt = FUNCTION_PLANNER_PROMPT.format(
+            context_block=context_block,
+            error_feedback=error_feedback or "None — this is the initial plan."
+        )
+
+        try:
+            response = _get_planner().chat.completions.create(
+                model=cfg.PLANNER_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=4000,
+                timeout=180.0,
+            )
+            content = response.choices[0].message.content
+            if not content:
+                raise ValueError("Empty response from Planner")
+
+            raw = content.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+                if raw.endswith("```"):
+                    raw = raw[:-3]
+                raw = raw.strip()
+
+            plan = json.loads(raw)
+            self.log(f"Planner produced plan: {len(plan.get('test_files', []))} file(s)")
+            return plan
+
+        except json.JSONDecodeError as e:
+            self.log(f"Planner returned invalid JSON: {e}")
+            try:
+                import json_repair
+                plan = json_repair.loads(raw)
+                return plan
+            except Exception:
+                return None
+        except Exception as e:
+            self.log(f"Planner error: {e}")
+            return None
+
+    def _replan_after_failure(self, context: dict, previous_plan: dict,
+                               test_code: str, error_output: str) -> Optional[dict]:
+        """Planner re-plans after Worker failure — new strategy, not just patching."""
+        self.log("Planner re-planning after Worker failure...")
+        cfg = _cfg()
+        source_code = self._extract_source_code(context)
+
+        prompt = HEAL_PLANNER_PROMPT.format(
+            source_code=source_code[:4000],
+            previous_plan=json.dumps(previous_plan, indent=2)[:2000],
+            test_code=test_code[:3000],
+            error_output=error_output[:2000],
+        )
+
+        try:
+            response = _get_planner().chat.completions.create(
+                model=cfg.PLANNER_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=4000,
+                timeout=180.0,
+            )
+            content = response.choices[0].message.content
+            if not content:
+                return None
+
+            raw = content.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+                if raw.endswith("```"):
+                    raw = raw[:-3]
+                raw = raw.strip()
+
+            new_plan = json.loads(raw)
+
+            if new_plan.get("real_bug"):
+                self.log(f"REAL BUG DETECTED by Planner: {new_plan.get('strategy_summary')}")
+                self.bugs_found.append({
+                    "file": self.file,
+                    "explanation": new_plan.get("strategy_summary", ""),
+                    "fix_suggestion": "",
+                })
+                return None  # Stop healing, không fix test nữa
+
+            self.log("Planner produced revised plan.")
+            return new_plan
+
+        except Exception as e:
+            self.log(f"Re-plan error: {e}")
+            return None
+
+    # ─── STEP 3: Worker generates test code ────────────────────────────
+    def _generate_tests(self, context: dict, force: bool = False) -> list:
+        """Worker writes test code from the plan."""
+        cfg = _cfg()
+        self.log(f"Worker is generating test code with model: {cfg.WORKER_MODEL}...")
         registry = _load_registry()
         generated = []
 
@@ -409,7 +519,7 @@ class TestAgent:
             source_hash = _sha256(source_code)
             existing = registry.get("functions", {}).get(registry_key)
 
-            if existing and existing.get("function_hash") == source_hash:
+            if not force and existing and existing.get("function_hash") == source_hash:
                 # Check if user has customized the test file
                 abs_test_path = os.path.join(cfg.CODEBASE_PATH, file_path).replace("\\", "/")
                 if os.path.exists(abs_test_path):
@@ -417,9 +527,21 @@ class TestAgent:
                         current_test_content = f.read()
                     if _sha256(current_test_content) != existing.get("test_file_hash"):
                         self.log(f"Skipping {file_path}: user has customized the test file")
+                        generated.append({
+                            "file_path": file_path,
+                            "abs_path": abs_test_path,
+                            "test_code": current_test_content,
+                            "plan": test_file_plan,
+                        })
                         continue
                     else:
                         self.log(f"Skipping {file_path}: source unchanged, test up to date")
+                        generated.append({
+                            "file_path": file_path,
+                            "abs_path": abs_test_path,
+                            "test_code": current_test_content,
+                            "plan": test_file_plan,
+                        })
                         continue
 
             prompt = GENERATOR_PROMPT.format(
@@ -435,9 +557,14 @@ class TestAgent:
                     max_tokens=8000,
                     timeout=300.0,
                 )
+                
+                # Validate response structure
+                if not response.choices:
+                    raise ValueError(f"Worker API returned no choices. Check WORKER_MODEL='{cfg.WORKER_MODEL}' is valid on OpenRouter.")
+                
                 test_code = response.choices[0].message.content
                 if not test_code:
-                    raise ValueError("Empty response from Worker")
+                    raise ValueError(f"Worker returned empty content for model '{cfg.WORKER_MODEL}'")
 
                 # Strip markdown fences if present
                 test_code = test_code.strip()
@@ -536,163 +663,36 @@ class TestAgent:
 
     # ─── STEP 5: Self-healing ──────────────────────────────────────────
     def _self_heal(self, failed_results: list, context: dict) -> bool:
-        """Commander diagnoses failures, Worker fixes the code. In bulk_mode, Worker fixes directly."""
-        cfg = _cfg()
-        source_code = self._extract_source_code(context)
+        """Planner re-plans after failures, Worker re-generates test code."""
         any_fixed = False
 
         for result in failed_results:
             test_code = result.get("test_code", "")
-            error_output = result.get("output", "")[:3000]  # Truncate long outputs
+            error_output = result.get("output", "")[:3000]
 
-            fixed_code = None
-            if self.bulk_mode:
-                self.log(f"Worker diagnosing and fixing failure directly in {result.get('file_path', '?')} (Bulk Mode, bypassing R1)...")
-                fixed_code = self._bulk_fix_test(source_code, test_code, error_output)
-            else:
-                # Commander diagnoses
-                self.log(f"Commander diagnosing failure in {result.get('file_path', '?')}...")
-                diagnosis = self._diagnose(source_code, test_code, error_output)
+            self.log(f"Planner re-planning after failure in {result.get('file_path', '?')}...")
 
-                if not diagnosis:
-                    self.log("Commander failed to diagnose. Skipping.")
-                    continue
+            new_plan = self._replan_after_failure(
+                context=context,
+                previous_plan=self.plan,
+                test_code=test_code,
+                error_output=error_output,
+            )
 
-                self.heal_history.append({
-                    "file": result.get("file_path"),
-                    "diagnosis": diagnosis,
-                })
+            if not new_plan:
+                self.log("Planner could not produce new plan (real bug or error). Skipping.")
+                continue
 
-                if diagnosis.get("diagnosis") == "real_bug":
-                    self.log(f"REAL BUG DETECTED: {diagnosis.get('explanation', '')}")
-                    self.bugs_found.append({
-                        "file": result.get("file_path"),
-                        "explanation": diagnosis.get("explanation", ""),
-                        "fix_suggestion": diagnosis.get("fix_instructions", ""),
-                    })
-                    continue
+            self.plan = new_plan
 
-                # Worker fixes
-                self.log(f"Worker fixing test code for {result.get('file_path', '?')}...")
-                fixed_code = self._fix_test(source_code, test_code, error_output, diagnosis)
+            self.log(f"Worker re-generating test for {result.get('file_path', '?')} with new plan...")
+            regenerated = self._generate_tests(context, force=True)
 
-            if fixed_code:
-                # Find the corresponding generated file and update it
-                for gen in self.generated_files:
-                    if gen["file_path"] == result.get("file_path"):
-                        abs_path = gen["abs_path"]
-                        with open(abs_path, "w", encoding="utf-8") as f:
-                            f.write(fixed_code)
-                        gen["test_code"] = fixed_code
-                        result["test_code"] = fixed_code
-
-                        # Update registry hash
-                        registry = _load_registry()
-                        registry_key = f"{self.target}::{self.file or ''}"
-                        if registry_key in registry.get("functions", {}):
-                            registry["functions"][registry_key]["test_file_hash"] = _sha256(fixed_code)
-                            _save_registry(registry)
-
-                        any_fixed = True
-                        self.log(f"Fixed and saved {result.get('file_path')}")
-                        break
+            if regenerated:
+                any_fixed = True
+                self.log(f"Worker re-generated {result.get('file_path')} successfully.")
 
         return any_fixed
-
-    def _bulk_fix_test(self, source_code: str, test_code: str, error_output: str) -> Optional[str]:
-        """Worker directly fixes the test code using a combined prompt without Commander R1."""
-        cfg = _cfg()
-        prompt = BULK_FIX_PROMPT.format(
-            source_code=source_code[:4000],
-            test_code=test_code[:4000],
-            error_output=error_output[:3000],
-        )
-        try:
-            response = _get_worker().chat.completions.create(
-                model=cfg.WORKER_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=8000,
-                timeout=300.0,
-            )
-            fixed_code = response.choices[0].message.content
-            if not fixed_code:
-                return None
-            fixed_code = fixed_code.strip()
-            if fixed_code.startswith("```"):
-                fixed_code = fixed_code.split("\n", 1)[1] if "\n" in fixed_code else fixed_code[3:]
-                if fixed_code.endswith("```"):
-                    fixed_code = fixed_code[:-3]
-                fixed_code = fixed_code.strip()
-            return fixed_code
-        except Exception as e:
-            self.log(f"Worker bulk fix error: {e}")
-            return None
-
-
-    def _diagnose(self, source_code: str, test_code: str, error_output: str) -> Optional[dict]:
-        """Commander analyzes a test failure."""
-        cfg = _cfg()
-        prompt = DIAGNOSIS_PROMPT.format(
-            source_code=source_code[:4000],
-            test_code=test_code[:4000],
-            error_output=error_output[:3000],
-        )
-
-        try:
-            response = _get_commander().chat.completions.create(
-                model=cfg.COMMANDER_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=2000,
-                timeout=180.0,
-            )
-            content = response.choices[0].message.content
-            if not content:
-                return None
-
-            raw = content.strip()
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-                if raw.endswith("```"):
-                    raw = raw[:-3]
-                raw = raw.strip()
-
-            return json.loads(raw)
-        except Exception as e:
-            self.log(f"Diagnosis error: {e}")
-            return None
-
-    def _fix_test(self, source_code: str, test_code: str, error_output: str, diagnosis: dict) -> Optional[str]:
-        """Worker rewrites the test code based on Commander's diagnosis."""
-        cfg = _cfg()
-        prompt = FIX_PROMPT.format(
-            source_code=source_code[:4000],
-            test_code=test_code[:4000],
-            error_output=error_output[:2000],
-            fix_instructions=diagnosis.get("fix_instructions", "Fix the failing test."),
-        )
-
-        try:
-            response = _get_worker().chat.completions.create(
-                model=cfg.WORKER_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=8000,
-                timeout=300.0,
-            )
-            code = response.choices[0].message.content
-            if not code:
-                return None
-
-            code = code.strip()
-            if code.startswith("```"):
-                code = code.split("\n", 1)[1] if "\n" in code else code[3:]
-                if code.endswith("```"):
-                    code = code[:-3]
-                code = code.strip()
-
-            return code
-        except Exception as e:
-            self.log(f"Fix error: {e}")
-            return None
 
     # ─── STEP 6: Compile report ────────────────────────────────────────
     def _compile_report(self, results: list) -> dict:
