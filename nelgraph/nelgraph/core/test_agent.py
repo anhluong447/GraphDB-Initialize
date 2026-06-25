@@ -68,6 +68,25 @@ def _get_worker():
     return _worker_client
 
 
+def _call_llm_with_retry(client_fn, *args, **kwargs):
+    """Executes chat.completions.create with 3 attempts on API or Connection errors."""
+    import time
+    max_attempts = 3
+    delay = 2.0
+    
+    for attempt in range(1, max_attempts + 1):
+        try:
+            client = client_fn()
+            return client.chat.completions.create(*args, **kwargs)
+        except (openai.APIError, openai.APIConnectionError, openai.APITimeoutError, ConnectionError, TimeoutError) as e:
+            if attempt == max_attempts:
+                print(f"[LLM Retry] Max attempts reached. Propagating error: {e}")
+                raise e
+            print(f"[LLM Retry] Attempt {attempt} failed: {e}. Retrying in {delay}s...")
+            time.sleep(delay)
+            delay *= 2
+
+
 # ─── Hash helpers ───────────────────────────────────────────────────────────
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -377,7 +396,8 @@ class TestAgent:
         prompt = COMMANDER_PLANNER_PROMPT.format(context_block=context_block)
 
         try:
-            response = _get_commander().chat.completions.create(
+            response = _call_llm_with_retry(
+                _get_commander,
                 model=cfg.COMMANDER_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=4000,
@@ -432,7 +452,8 @@ class TestAgent:
         )
 
         try:
-            response = _get_planner().chat.completions.create(
+            response = _call_llm_with_retry(
+                _get_planner,
                 model=cfg.PLANNER_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=4000,
@@ -480,7 +501,8 @@ class TestAgent:
         )
 
         try:
-            response = _get_planner().chat.completions.create(
+            response = _call_llm_with_retry(
+                _get_planner,
                 model=cfg.PLANNER_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=4000,
@@ -575,7 +597,8 @@ class TestAgent:
             )
 
             try:
-                response = _get_worker().chat.completions.create(
+                response = _call_llm_with_retry(
+                    _get_worker,
                     model=cfg.WORKER_MODEL,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=8000,

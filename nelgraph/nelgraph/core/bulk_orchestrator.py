@@ -6,7 +6,7 @@ import threading
 import concurrent.futures
 from typing import Optional
 
-from nelgraph.core.test_agent import TestAgent, _get_commander, _cfg
+from nelgraph.core.test_agent import TestAgent, _get_commander, _cfg, _call_llm_with_retry
 from nelgraph.knowledge_base import mark_tested
 
 # ─── BulkTestOrchestrator ──────────────────────────────────────────
@@ -206,7 +206,8 @@ RULES:
         }
 
         try:
-            response = _get_commander().chat.completions.create(
+            response = _call_llm_with_retry(
+                _get_commander,
                 model=cfg.COMMANDER_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=4000,
