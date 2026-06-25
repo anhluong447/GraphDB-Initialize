@@ -497,7 +497,16 @@ class TestAgent:
                     raw = raw[:-3]
                 raw = raw.strip()
 
-            new_plan = json.loads(raw)
+            try:
+                new_plan = json.loads(raw)
+            except json.JSONDecodeError as e:
+                self.log(f"Planner returned invalid JSON in re-plan, attempting recovery: {e}")
+                try:
+                    import json_repair
+                    new_plan = json_repair.loads(raw)
+                    self.log("Recovered revised plan via json_repair.")
+                except Exception:
+                    raise e
 
             if new_plan.get("real_bug"):
                 self.log(f"REAL BUG DETECTED by Planner: {new_plan.get('strategy_summary')}")
