@@ -261,7 +261,8 @@ RULES:
             mode=test_type,
             file=fn.get("file"),
             class_name=fn.get("class_name"),
-            injected_plan=injected_plan
+            injected_plan=injected_plan,
+            bulk_mode=True
         )
 
         # 6. Run Agent (which runs Worker + Self-healing loop)

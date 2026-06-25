@@ -8,10 +8,45 @@ export default function TestCoverageView({ status, onMarkTested, onGenerateTest 
   const [loading, setLoading] = useState(true)
   
   // Bulk test states
-  const [bulkTaskId, setBulkTaskId] = useState(null)
-  const [bulkStatus, setBulkStatus] = useState(null) // null | 'running' | 'done' | 'error'
-  const [bulkProgress, setBulkProgress] = useState(null) // { done, total, current }
-  const [bulkSummary, setBulkSummary] = useState(null) // { total, passed, failed, skipped, bugs_found }
+  const [bulkTaskId, setBulkTaskId] = useState(() => localStorage.getItem('nelgraph_bulk_task_id') || null)
+  const [bulkStatus, setBulkStatus] = useState(() => localStorage.getItem('nelgraph_bulk_status') || null)
+  const [bulkProgress, setBulkProgress] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nelgraph_bulk_progress')
+      return saved ? JSON.parse(saved) : null
+    } catch {
+      return null
+    }
+  })
+  const [bulkSummary, setBulkSummary] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nelgraph_bulk_summary')
+      return saved ? JSON.parse(saved) : null
+    } catch {
+      return null
+    }
+  })
+
+  // Synchronize bulk states to localStorage
+  useEffect(() => {
+    if (bulkTaskId) localStorage.setItem('nelgraph_bulk_task_id', bulkTaskId)
+    else localStorage.removeItem('nelgraph_bulk_task_id')
+  }, [bulkTaskId])
+
+  useEffect(() => {
+    if (bulkStatus) localStorage.setItem('nelgraph_bulk_status', bulkStatus)
+    else localStorage.removeItem('nelgraph_bulk_status')
+  }, [bulkStatus])
+
+  useEffect(() => {
+    if (bulkProgress) localStorage.setItem('nelgraph_bulk_progress', JSON.stringify(bulkProgress))
+    else localStorage.removeItem('nelgraph_bulk_progress')
+  }, [bulkProgress])
+
+  useEffect(() => {
+    if (bulkSummary) localStorage.setItem('nelgraph_bulk_summary', JSON.stringify(bulkSummary))
+    else localStorage.removeItem('nelgraph_bulk_summary')
+  }, [bulkSummary])
 
   useEffect(() => {
     axios.get(`${API}/functions?tested=false&limit=200`)

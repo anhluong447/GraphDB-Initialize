@@ -176,12 +176,30 @@ FIX_PROMPT = """You are an expert test code fixer. Fix the following test code b
 Write the COMPLETE fixed test file. Include all imports. Return ONLY code, no markdown fences.
 """
 
+BULK_FIX_PROMPT = """You are an expert test code fixer. A generated test file has failed.
+Analyze the source code, the existing test code, and the test execution error log, and output a corrected version of the test code.
+
+Do not change the source code. Only fix the test code.
+
+## Original Source Code
+{source_code}
+
+## Current Test Code (has errors)
+{test_code}
+
+## Error Output
+{error_output}
+
+Please fix any issues (such as incorrect mocks, imports, assertions, or syntax errors) and return the COMPLETE updated test code.
+Respond ONLY with the code inside a python code block (```python ... ```) or plain text. Do not include any explanations.
+"""
+
 
 # ─── TestAgent ──────────────────────────────────────────────────────────────
 class TestAgent:
     """Autonomous dual-model test generation agent."""
 
-    def __init__(self, target: str, mode: str = "unit", file: str = None, class_name: str = None, injected_plan: dict = None):
+    def __init__(self, target: str, mode: str = "unit", file: str = None, class_name: str = None, injected_plan: dict = None, bulk_mode: bool = False):
         """
         Args:
             target: Function name or community name to test.
@@ -189,18 +207,21 @@ class TestAgent:
             file: Optional file path for disambiguation.
             class_name: Optional class name for disambiguation.
             injected_plan: Pre-computed plan to bypass Commander planning step.
+            bulk_mode: If True, bypasses Commander diagnosis to save tokens.
         """
         self.target = target
         self.mode = mode
         self.file = file
         self.class_name = class_name
         self.injected_plan = injected_plan
+        self.bulk_mode = bulk_mode
         self.plan = None
         self.generated_files = []
         self.test_results = []
         self.heal_history = []
         self.bugs_found = []
         self._log = []
+
 
     def log(self, msg: str):
         ts = time.strftime("%H:%M:%S")
@@ -515,7 +536,7 @@ class TestAgent:
 
     # ─── STEP 5: Self-healing ──────────────────────────────────────────
     def _self_heal(self, failed_results: list, context: dict) -> bool:
-        """Commander diagnoses failures, Worker fixes the code."""
+        """Commander diagnoses failures, Worker fixes the code. In bulk_mode, Worker fixes directly."""
         cfg = _cfg()
         source_code = self._extract_source_code(context)
         any_fixed = False
@@ -524,31 +545,36 @@ class TestAgent:
             test_code = result.get("test_code", "")
             error_output = result.get("output", "")[:3000]  # Truncate long outputs
 
-            # Commander diagnoses
-            self.log(f"Commander diagnosing failure in {result.get('file_path', '?')}...")
-            diagnosis = self._diagnose(source_code, test_code, error_output)
+            fixed_code = None
+            if self.bulk_mode:
+                self.log(f"Worker diagnosing and fixing failure directly in {result.get('file_path', '?')} (Bulk Mode, bypassing R1)...")
+                fixed_code = self._bulk_fix_test(source_code, test_code, error_output)
+            else:
+                # Commander diagnoses
+                self.log(f"Commander diagnosing failure in {result.get('file_path', '?')}...")
+                diagnosis = self._diagnose(source_code, test_code, error_output)
 
-            if not diagnosis:
-                self.log("Commander failed to diagnose. Skipping.")
-                continue
+                if not diagnosis:
+                    self.log("Commander failed to diagnose. Skipping.")
+                    continue
 
-            self.heal_history.append({
-                "file": result.get("file_path"),
-                "diagnosis": diagnosis,
-            })
-
-            if diagnosis.get("diagnosis") == "real_bug":
-                self.log(f"REAL BUG DETECTED: {diagnosis.get('explanation', '')}")
-                self.bugs_found.append({
+                self.heal_history.append({
                     "file": result.get("file_path"),
-                    "explanation": diagnosis.get("explanation", ""),
-                    "fix_suggestion": diagnosis.get("fix_instructions", ""),
+                    "diagnosis": diagnosis,
                 })
-                continue
 
-            # Worker fixes
-            self.log(f"Worker fixing test code for {result.get('file_path', '?')}...")
-            fixed_code = self._fix_test(source_code, test_code, error_output, diagnosis)
+                if diagnosis.get("diagnosis") == "real_bug":
+                    self.log(f"REAL BUG DETECTED: {diagnosis.get('explanation', '')}")
+                    self.bugs_found.append({
+                        "file": result.get("file_path"),
+                        "explanation": diagnosis.get("explanation", ""),
+                        "fix_suggestion": diagnosis.get("fix_instructions", ""),
+                    })
+                    continue
+
+                # Worker fixes
+                self.log(f"Worker fixing test code for {result.get('file_path', '?')}...")
+                fixed_code = self._fix_test(source_code, test_code, error_output, diagnosis)
 
             if fixed_code:
                 # Find the corresponding generated file and update it
@@ -572,6 +598,36 @@ class TestAgent:
                         break
 
         return any_fixed
+
+    def _bulk_fix_test(self, source_code: str, test_code: str, error_output: str) -> Optional[str]:
+        """Worker directly fixes the test code using a combined prompt without Commander R1."""
+        cfg = _cfg()
+        prompt = BULK_FIX_PROMPT.format(
+            source_code=source_code[:4000],
+            test_code=test_code[:4000],
+            error_output=error_output[:3000],
+        )
+        try:
+            response = _get_worker().chat.completions.create(
+                model=cfg.WORKER_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=8000,
+                timeout=300.0,
+            )
+            fixed_code = response.choices[0].message.content
+            if not fixed_code:
+                return None
+            fixed_code = fixed_code.strip()
+            if fixed_code.startswith("```"):
+                fixed_code = fixed_code.split("\n", 1)[1] if "\n" in fixed_code else fixed_code[3:]
+                if fixed_code.endswith("```"):
+                    fixed_code = fixed_code[:-3]
+                fixed_code = fixed_code.strip()
+            return fixed_code
+        except Exception as e:
+            self.log(f"Worker bulk fix error: {e}")
+            return None
+
 
     def _diagnose(self, source_code: str, test_code: str, error_output: str) -> Optional[dict]:
         """Commander analyzes a test failure."""
