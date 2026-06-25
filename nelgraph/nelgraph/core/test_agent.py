@@ -597,29 +597,54 @@ class TestAgent:
             )
 
             try:
-                response = _call_llm_with_retry(
-                    _get_worker,
-                    model=cfg.WORKER_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=8000,
-                    timeout=300.0,
-                )
-                
-                # Validate response structure
-                if not response.choices:
-                    raise ValueError(f"Worker API returned no choices. Check WORKER_MODEL='{cfg.WORKER_MODEL}' is valid on OpenRouter.")
-                
-                test_code = response.choices[0].message.content
-                if not test_code:
-                    raise ValueError(f"Worker returned empty content for model '{cfg.WORKER_MODEL}'")
-
-                # Strip markdown fences if present
-                test_code = test_code.strip()
-                if test_code.startswith("```"):
-                    test_code = test_code.split("\n", 1)[1] if "\n" in test_code else test_code[3:]
-                    if test_code.endswith("```"):
-                        test_code = test_code[:-3]
-                    test_code = test_code.strip()
+                max_gen_attempts = 3
+                test_code = None
+                for gen_attempt in range(1, max_gen_attempts + 1):
+                    try:
+                        response = _call_llm_with_retry(
+                            _get_worker,
+                            model=cfg.WORKER_MODEL,
+                            messages=[{"role": "user", "content": prompt}],
+                            max_tokens=8000,
+                            timeout=300.0,
+                        )
+                        
+                        # Validate response structure
+                        if not response.choices:
+                            raise ValueError(f"Worker API returned no choices. Check WORKER_MODEL='{cfg.WORKER_MODEL}' is valid on OpenRouter.")
+                        
+                        choice = response.choices[0]
+                        finish_reason = getattr(choice, "finish_reason", None)
+                        if finish_reason in ("error", "length"):
+                            err_info = getattr(choice, "error", None) or f"finish_reason is '{finish_reason}' (truncated)"
+                            raise ValueError(f"OpenRouter response truncated or errored: {err_info}")
+                            
+                        raw_content = choice.message.content
+                        if not raw_content:
+                            raise ValueError(f"Worker returned empty content for model '{cfg.WORKER_MODEL}'")
+                        
+                        # Strip markdown fences if present
+                        raw_content = raw_content.strip()
+                        if raw_content.startswith("```"):
+                            raw_content = raw_content.split("\n", 1)[1] if "\n" in raw_content else raw_content[3:]
+                            if raw_content.endswith("```"):
+                                raw_content = raw_content[:-3]
+                            raw_content = raw_content.strip()
+                        
+                        # Syntax validation for Python files
+                        if file_path.endswith(".py"):
+                            import ast
+                            try:
+                                ast.parse(raw_content)
+                            except SyntaxError as se:
+                                raise ValueError(f"Generated Python code has a syntax error: {se}")
+                                
+                        test_code = raw_content
+                        break  # Success!
+                    except Exception as e:
+                        if gen_attempt == max_gen_attempts:
+                            raise e
+                        self.log(f"Worker generation attempt {gen_attempt} failed: {e}. Retrying generation...")
 
                 # Write test file
                 abs_test_path = os.path.join(cfg.CODEBASE_PATH, file_path).replace("\\", "/")
