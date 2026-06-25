@@ -144,6 +144,22 @@ def generate_tests_all(req: BulkGenRequest):
             report = orchestrator.run(progress_callback=update_progress)
             _test_tasks[task_id]["status"] = "done"
             _test_tasks[task_id]["result"] = report
+
+            # Save report to disk
+            try:
+                reports_dir = os.path.join(GRAPHRAG_DATA_DIR, "reports")
+                os.makedirs(reports_dir, exist_ok=True)
+                report_path = os.path.join(reports_dir, f"bulk_report_{task_id}.json")
+                latest_path = os.path.join(GRAPHRAG_DATA_DIR, "bulk_report_latest.json")
+                
+                with open(report_path, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2, ensure_ascii=False)
+                with open(latest_path, "w", encoding="utf-8") as f:
+                    json.dump(report, f, indent=2, ensure_ascii=False)
+                logger.info(f"Saved bulk test report to {report_path} and bulk_report_latest.json")
+            except Exception as re:
+                logger.error(f"Failed to save bulk test report to disk: {re}", exc_info=True)
+
         except Exception as e:
             logger.error(f"BulkTestOrchestrator error: {e}", exc_info=True)
             _test_tasks[task_id]["status"] = "error"
