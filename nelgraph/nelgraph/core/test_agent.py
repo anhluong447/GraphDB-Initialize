@@ -202,6 +202,9 @@ GENERATOR_PROMPT = """You are an expert test code writer. Write complete, runnab
 
 ## Testing Framework: {framework}
 
+## Previous Test Run Error (if this is a re-generation after a test failure)
+{previous_error}
+
 RULES:
 - Write a COMPLETE, RUNNABLE test file. Include all imports.
 - Use {framework} syntax and conventions.
@@ -210,6 +213,7 @@ RULES:
 - Use descriptive test names matching the plan's test case names.
 - Include proper setup/teardown if needed.
 - Return ONLY the Python/JS code, no markdown fences, no explanations.
+- CRITICAL: If previous_error is not "None", you must analyze and fix that specific error, and avoid repeating the failed approach.
 """
 
 
@@ -512,7 +516,7 @@ class TestAgent:
             return None
 
     # ─── STEP 3: Worker generates test code ────────────────────────────
-    def _generate_tests(self, context: dict, force: bool = False) -> list:
+    def _generate_tests(self, context: dict, force: bool = False, previous_error: str = "") -> list:
         """Worker writes test code from the plan."""
         cfg = _cfg()
         self.log(f"Worker is generating test code with model: {cfg.WORKER_MODEL}...")
@@ -558,6 +562,7 @@ class TestAgent:
                 plan_json=json.dumps(test_file_plan, indent=2),
                 source_code=source_code,
                 framework=cfg.TEST_FRAMEWORK,
+                previous_error=previous_error or "None — this is the initial generation.",
             )
 
             try:
@@ -706,11 +711,11 @@ class TestAgent:
             self.plan = new_plan
 
             self.log(f"Worker re-generating test for {result.get('file_path', '?')} with new plan...")
-            regenerated = self._generate_tests(context, force=True)
+            regenerated = self._generate_tests(context, force=True, previous_error=error_output)
 
             if regenerated:
                 any_fixed = True
-                self.log(f"Worker re-generated {result.get('file_path')} successfully.")
+                self.log(f"Worker re-generated test file {result.get('file_path')} with revised plan. Re-running tests to verify.")
 
         return any_fixed
 
