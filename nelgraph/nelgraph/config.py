@@ -49,7 +49,7 @@ SUPPORTED_LANGUAGES = {
 }
 
 # Directories to skip during parsing
-IGNORE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".next", ".cursor", ".claude", ".codex", ".gemini", ".ai-log"}
+IGNORE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".next", ".cursor", ".claude", ".codex", ".gemini", ".ai-log", ".agent"}
 tool_dir_name = os.path.basename(config_dir)
 if tool_dir_name and os.path.abspath(CODEBASE_PATH) != os.path.abspath(config_dir):
     IGNORE_DIRS.add(tool_dir_name)
