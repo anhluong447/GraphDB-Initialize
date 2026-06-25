@@ -71,6 +71,7 @@ WORKER_MODEL = os.getenv("WORKER_MODEL", "qwen/qwen-2.5-coder-32b-instruct")
 TEST_FRAMEWORK = os.getenv("TEST_FRAMEWORK", "pytest")  # pytest | jest | vitest
 PYTEST_PATH = os.getenv("PYTEST_PATH", "")
 MAX_HEAL_RETRIES = int(os.getenv("MAX_HEAL_RETRIES", "3"))
+MAX_BULK_WORKERS = int(os.getenv("MAX_BULK_WORKERS", "5"))
 
 # Neo4j
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")

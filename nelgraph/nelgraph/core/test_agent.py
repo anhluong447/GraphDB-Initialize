@@ -129,6 +129,7 @@ executable test plan for a single function, based on its source code and graph c
 
 ## Function Context
 {context_block}
+{group_hint}
 
 ## Error Feedback (if this is a re-plan after a test failure)
 {error_feedback}
@@ -216,7 +217,7 @@ RULES:
 class TestAgent:
     """Autonomous dual-model test generation agent."""
 
-    def __init__(self, target: str, mode: str = "unit", file: str = None, class_name: str = None, injected_plan: dict = None):
+    def __init__(self, target: str, mode: str = "unit", file: str = None, class_name: str = None, injected_plan: dict = None, group_context: dict = None):
         """
         Args:
             target: Function name or community name to test.
@@ -224,12 +225,14 @@ class TestAgent:
             file: Optional file path for disambiguation.
             class_name: Optional class name for disambiguation.
             injected_plan: Pre-computed plan to bypass Commander planning step.
+            group_context: Optional group-level context.
         """
         self.target = target
         self.mode = mode
         self.file = file
         self.class_name = class_name
         self.injected_plan = injected_plan
+        self.group_context = group_context
         self.plan = None
         self.generated_files = []
         self.test_results = []
@@ -412,8 +415,15 @@ class TestAgent:
         cfg = _cfg()
         context_block = self._format_context_for_prompt(context)
 
+        group_hint = ""
+        if self.group_context:
+            shared_mocks = self.group_context.get("shared_mocks", [])
+            if shared_mocks:
+                group_hint = f"\n\n## Group-Level Shared Mocks (from Commander)\nThese mocks are shared across the module — include them in your plan:\n{json.dumps(shared_mocks, indent=2)}\n"
+
         prompt = FUNCTION_PLANNER_PROMPT.format(
             context_block=context_block,
+            group_hint=group_hint,
             error_feedback=error_feedback or "None — this is the initial plan."
         )
 

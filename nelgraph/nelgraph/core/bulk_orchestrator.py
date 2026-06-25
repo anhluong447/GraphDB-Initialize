@@ -2,6 +2,8 @@ import os
 import sys
 import json
 import time
+import threading
+import concurrent.futures
 from typing import Optional
 
 from nelgraph.core.test_agent import TestAgent, _get_commander, _cfg
@@ -25,12 +27,43 @@ class BulkTestOrchestrator:
         self.bugs_found = []
         self._log = []
         self.progress = {"done": 0, "total": len(functions), "current": None}
+        self._lock = threading.Lock()
 
     def log(self, msg: str):
         ts = time.strftime("%H:%M:%S")
         entry = f"[{ts}] {msg}"
         self._log.append(entry)
         print(f"[BulkTestOrchestrator] {entry}")
+
+    def _make_skip_result(self, fn: dict) -> dict:
+        return {
+            "success": True,
+            "target": fn["name"],
+            "mode": self.mode,
+            "skipped": True,
+            "summary": {"total_files": 0, "passed": 0, "failed": 0, "self_healed": 0, "bugs_found": 0},
+            "strategy": "Skipped by Commander directive",
+            "generated_files": [],
+            "test_results": [],
+            "bugs_found": [],
+            "heal_history": [],
+            "log": ["Skipped by Commander master plan directive."]
+        }
+
+    def _make_error_result(self, fn: dict, error: str) -> dict:
+        return {
+            "success": False,
+            "target": fn["name"],
+            "mode": self.mode,
+            "error": error,
+            "summary": {"total_files": 0, "passed": 0, "failed": 0, "self_healed": 0, "bugs_found": 0},
+            "strategy": "Error during execution",
+            "generated_files": [],
+            "test_results": [],
+            "bugs_found": [],
+            "heal_history": [],
+            "log": [f"Error processing: {error}"]
+        }
 
     def run(self, progress_callback=None) -> dict:
         self.log(f"Starting bulk test generation for {len(self.functions)} function(s)...")
@@ -40,52 +73,70 @@ class BulkTestOrchestrator:
         if progress_callback:
             progress_callback(self.progress, self.results, self.bugs_found)
 
-        # Step 2: Worker processes each function using the master plan guidelines
+        # Build lookup: function_name -> group_context
+        fn_to_group = {}
+        for group in self.master_plan.get("groups", []):
+            for fn_name in group.get("functions", []):
+                fn_to_group[fn_name] = {
+                    "group_name": group.get("group_name"),
+                    "test_type": group.get("test_type", self.mode),
+                    "shared_mocks": group.get("shared_mocks", []),
+                }
+
+        # Sort self.functions according to priority_order
+        priority = self.master_plan.get("priority_order", [])
+        priority_index = {name: i for i, name in enumerate(priority)}
+        self.functions = sorted(
+            self.functions,
+            key=lambda fn: priority_index.get(fn["name"], len(priority))
+        )
+
         skip_list = self.master_plan.get("skip", [])
-        for fn in self.functions:
+        fns_to_run = [fn for fn in self.functions if fn["name"] not in skip_list]
+        fns_skipped = [fn for fn in self.functions if fn["name"] in skip_list]
+
+        # Process skipped functions immediately
+        for fn in fns_skipped:
+            self.log(f"Skipping function '{fn['name']}' as per Commander's master plan directive.")
+            self.results.append(self._make_skip_result(fn))
+            self.progress["done"] += 1
+
+        if progress_callback:
+            progress_callback(self.progress, self.results, self.bugs_found)
+
+        # Step 2: Concurrent worker execution
+        cfg = _cfg()
+        max_workers = getattr(cfg, "MAX_BULK_WORKERS", 5)
+        self.log(f"Starting concurrent test generation with max_workers={max_workers}")
+
+        def _run_one(fn):
             self.progress["current"] = fn["name"]
             if progress_callback:
                 progress_callback(self.progress, self.results, self.bugs_found)
 
-            if fn["name"] in skip_list:
-                self.log(f"Skipping function '{fn['name']}' as per Commander's master plan directive.")
-                result = {
-                    "success": True,
-                    "target": fn["name"],
-                    "mode": self.mode,
-                    "skipped": True,
-                    "summary": {"total_files": 0, "passed": 0, "failed": 0, "self_healed": 0, "bugs_found": 0},
-                    "strategy": "Skipped by Commander directive",
-                    "generated_files": [],
-                    "test_results": [],
-                    "bugs_found": [],
-                    "heal_history": [],
-                    "log": ["Skipped by Commander master plan directive."]
-                }
-            else:
-                try:
-                    result = self._worker_run_single(fn)
-                except Exception as e:
-                    self.log(f"Error processing '{fn['name']}': {e}")
-                    result = {
-                        "success": False,
-                        "target": fn["name"],
-                        "mode": self.mode,
-                        "error": str(e),
-                        "summary": {"total_files": 0, "passed": 0, "failed": 0, "self_healed": 0, "bugs_found": 0},
-                        "strategy": "Error during execution",
-                        "generated_files": [],
-                        "test_results": [],
-                        "bugs_found": [],
-                        "heal_history": [],
-                        "log": [f"Error processing: {e}"]
-                    }
+            try:
+                result = self._worker_run_single(fn, group_context=fn_to_group.get(fn["name"]))
+            except Exception as e:
+                self.log(f"Error processing '{fn['name']}': {e}")
+                result = self._make_error_result(fn, str(e))
 
-            self.results.append(result)
-            self.progress["done"] += 1
+            with self._lock:
+                self.results.append(result)
+                self.progress["done"] += 1
+                if progress_callback:
+                    progress_callback(self.progress, self.results, self.bugs_found)
 
-            if progress_callback:
-                progress_callback(self.progress, self.results, self.bugs_found)
+            return result
+
+        if fns_to_run:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(_run_one, fn): fn for fn in fns_to_run}
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        fn = futures[future]
+                        self.log(f"Unhandled error in thread for '{fn['name']}': {e}")
 
         self.log(f"Bulk test run completed: {self.progress['done']}/{self.progress['total']} processed.")
         return self._compile_report()
@@ -190,17 +241,18 @@ RULES:
             self.log(f"Error getting batch plan from Commander: {e}. Falling back to default plan.")
             return fallback_plan
 
-    def _worker_run_single(self, fn: dict) -> dict:
+    def _worker_run_single(self, fn: dict, group_context: dict = None) -> dict:
         """Run Worker to generate and self-heal test for a single function."""
         self.log(f"Processing: {fn['name']} ({fn.get('file')})")
 
         # We do not inject a plan here anymore, so TestAgent can use its Planner layer
         agent = TestAgent(
             target=fn["name"],
-            mode=self.mode,
+            mode=group_context.get("test_type", self.mode) if group_context else self.mode,
             file=fn.get("file"),
             class_name=fn.get("class_name"),
             injected_plan=None,
+            group_context=group_context,
         )
 
         # Run Agent (which runs Planner -> Worker + Self-healing loop)
@@ -208,7 +260,8 @@ RULES:
 
         # Collect results
         if agent.bugs_found:
-            self.bugs_found.extend(agent.bugs_found)
+            with self._lock:
+                self.bugs_found.extend(agent.bugs_found)
 
         success = report.get("success", False)
         self.log(f"  -> {'PASSED' if success else 'FAILED'}: {fn['name']}")
