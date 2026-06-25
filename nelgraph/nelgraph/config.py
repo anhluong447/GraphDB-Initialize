@@ -69,6 +69,7 @@ COMMANDER_MODEL = os.getenv("COMMANDER_MODEL", "deepseek/deepseek-r1")
 PLANNER_MODEL = os.getenv("PLANNER_MODEL", "deepseek/deepseek-v4-flash")
 WORKER_MODEL = os.getenv("WORKER_MODEL", "qwen/qwen-2.5-coder-32b-instruct")
 TEST_FRAMEWORK = os.getenv("TEST_FRAMEWORK", "pytest")  # pytest | jest | vitest
+PYTEST_PATH = os.getenv("PYTEST_PATH", "")
 MAX_HEAL_RETRIES = int(os.getenv("MAX_HEAL_RETRIES", "3"))
 
 # Neo4j

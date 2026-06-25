@@ -14,7 +14,7 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from nelgraph.graph.neo4j_client import get_client
 from nelgraph.query.engine import query, get_node_detail, list_open_tasks
-from nelgraph.config import PROJECT_NAME, CODEBASE_PATH, SYNC_STATE_PATH, GRAPHRAG_DATA_DIR
+from nelgraph.config import PROJECT_NAME, CODEBASE_PATH, SYNC_STATE_PATH, GRAPHRAG_DATA_DIR, PYTEST_PATH
 
 # Set up logging to file in .graphrag_data and standard output
 os.makedirs(GRAPHRAG_DATA_DIR, exist_ok=True)
@@ -238,6 +238,7 @@ def generate_tests_all(req: BulkGenRequest):
             ORDER BY f.complexity DESC
         """)
         rows = [dict(r) for r in result]
+        rows = [fn for fn in rows if not fn["name"].startswith("test_")]
     except Exception as e:
         logger.error(f"Error querying untested functions from Neo4j: {e}", exc_info=True)
         return {"error": f"Failed to retrieve functions: {e}"}
@@ -315,6 +316,8 @@ def generate_tests_incremental(req: IncrementalGenRequest):
     seen = set()
     unique_fns = []
     for f in fns + callers:
+        if f["name"].startswith("test_"):
+            continue
         key = (f["name"], f.get("file"))
         if key not in seen:
             seen.add(key)
@@ -402,14 +405,20 @@ class TestRunRequest(BaseModel):
 @app.post("/test/run")
 def run_single_test(req: TestRunRequest):
     """Run a single test file and return results."""
-    import subprocess, sys
+    import subprocess, sys, shutil
     abs_path = os.path.join(CODEBASE_PATH, req.file_path).replace("\\", "/")
     if not os.path.exists(abs_path):
         return {"status": "error", "output": f"File not found: {abs_path}"}
 
+    pytest_exe = PYTEST_PATH or shutil.which("pytest")
+    if pytest_exe:
+        cmd = [pytest_exe, abs_path, "-v", "--tb=short", "--no-header", "-q"]
+    else:
+        cmd = [sys.executable, "-m", "pytest", abs_path, "-v", "--tb=short", "--no-header", "-q"]
+
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", abs_path, "-v", "--tb=short", "--no-header", "-q"],
+            cmd,
             cwd=CODEBASE_PATH,
             capture_output=True, text=True, timeout=60,
             env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},

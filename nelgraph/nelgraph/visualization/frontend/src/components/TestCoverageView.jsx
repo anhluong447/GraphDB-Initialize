@@ -174,6 +174,29 @@ export default function TestCoverageView({ status, onMarkTested, onGenerateTest 
             {untested.length} untested functions
           </div>
         </div>
+
+        {/* View Latest Report button */}
+        <div 
+          style={{ 
+            ...styles.bigCard, 
+            display: 'flex', 
+            flexDirection: 'column', 
+            justifyContent: 'center', 
+            alignItems: 'center', 
+            cursor: 'pointer',
+            border: '1px solid var(--color-border-secondary)',
+            background: 'var(--color-background-tertiary)',
+            transition: 'all 0.2s ease'
+          }} 
+          onClick={() => setInspectTaskId('latest')}
+        >
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            📋 View Latest Report
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--color-text-tertiary)', marginTop: 4 }}>
+            Review previous batch runs
+          </div>
+        </div>
       </div>
 
       {/* Bulk progress banner */}

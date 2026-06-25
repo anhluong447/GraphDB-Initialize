@@ -631,14 +631,24 @@ class TestAgent:
         cfg = _cfg()
 
         if cfg.TEST_FRAMEWORK == "pytest":
-            cmd = [
-                sys.executable, "-m", "pytest", test_file_path,
-                "-v", "--tb=short", "--no-header", "-q"
-            ]
+            import shutil
+            pytest_exe = cfg.PYTEST_PATH or shutil.which("pytest")
+            if pytest_exe:
+                cmd = [pytest_exe, test_file_path, "-v", "--tb=short", "--no-header", "-q"]
+            else:
+                cmd = [
+                    sys.executable, "-m", "pytest", test_file_path,
+                    "-v", "--tb=short", "--no-header", "-q"
+                ]
         elif cfg.TEST_FRAMEWORK in ("jest", "vitest"):
             cmd = ["npx", cfg.TEST_FRAMEWORK, test_file_path, "--no-coverage"]
         else:
-            cmd = [sys.executable, "-m", "pytest", test_file_path, "-v", "--tb=short"]
+            import shutil
+            pytest_exe = cfg.PYTEST_PATH or shutil.which("pytest")
+            if pytest_exe:
+                cmd = [pytest_exe, test_file_path, "-v", "--tb=short"]
+            else:
+                cmd = [sys.executable, "-m", "pytest", test_file_path, "-v", "--tb=short"]
 
         try:
             proc = subprocess.run(

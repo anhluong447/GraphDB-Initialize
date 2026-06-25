@@ -134,7 +134,9 @@ Produce a JSON master test plan with EXACTLY this structure:
 RULES:
 - `groups`: Group functions that belong to the same module/community, share dependencies, or should be tested together.
 - `shared_mocks`: Define high-level dependencies or resources (e.g. databases, external APIs, time, network) that should be mocked for this group.
-- `skip`: List functions that are too simple (complexity <= 1, trivial getters/setters, empty methods) or do not require test generation.
+- `skip`: List functions that are TRULY trivial — ONLY: empty methods (pass-only body), pure property getters that return a single attribute with no logic, or __repr__/__str__ that only do string formatting.
+- NEVER skip: async functions, functions with conditional logic, __init__ with non-trivial setup, functions that call other methods or external dependencies.
+- NEVER skip functions whose names start with 'test_' — those are pre-existing test functions being indexed as source code, not generation targets. They should have been filtered before reaching this step.
 - Return ONLY valid JSON, no markdown fences.
 """
 
