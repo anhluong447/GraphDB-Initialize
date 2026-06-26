@@ -20,8 +20,9 @@ It automatically parses source code, builds Abstract Syntax Tree (AST) call grap
 6. [CLI Command Reference](#-cli-command-reference)
 7. [Programmatic Python API](#-programmatic-python-api)
 8. [Interactive Visualization Dashboard](#-interactive-visualization-dashboard)
-9. [Automated Testing Environment](#-automated-testing-environment)
-10. [Agent Skill Integration](#-agent-skill-integration)
+9. [Autonomous Test Generation & Self-Healing](#-autonomous-test-generation--self-healing)
+10. [Automated Testing Environment](#-automated-testing-environment)
+11. [Agent Skill Integration](#-agent-skill-integration)
 
 ---
 
@@ -36,6 +37,8 @@ AI coding agents struggle with large codebases because reading raw files is slow
 
 ## ✨ Key Features
 
+* 🧠 **Autonomous AI Test Generation**: Automatically generates complete, runnable unit, integration, and system tests utilizing a dual-agent **Commander-Worker** pattern.
+* 🛡️ **AI Self-Healing Loop**: Executes generated tests inside an isolated sandbox, automatically intercepts errors, diagnoses them via the Commander, and implements code fixes via the Worker (up to 3 retries).
 * 🧬 **AST Call-Graph Parser**: Powered by **Tree-Sitter** to parse Python, PHP, JavaScript, and TypeScript/JSX/TSX. It extracts classes, functions, complexity, input signatures, return types, raises, and constructs precise call relationships.
 * 📦 **Dynamic Import & Dependency Tracker**: Maps module imports (`File -[:IMPORTS]-> Module`). Automatically distinguishes standard library, external packages, and internal project dependencies.
 * 🌿 **Git Commit-to-Function Mapper**: Parses Git commit diffs to link modified lines directly to the specific functions they affected (`Commit -[:CHANGED]-> Function`), enabling precise Test Impact Analysis.
@@ -130,7 +133,9 @@ import nelgraph
 # 1. Optional configuration (fallback to local .env if not specified)
 nelgraph.configure(
     codebase_path="/absolute/path/to/project",
-    openrouter_api_key="your-openrouter-api-key"
+    openrouter_api_key="your-openrouter-api-key",
+    commander_model="deepseek/deepseek-r1",
+    worker_model="qwen/qwen-2.5-coder-32b-instruct"
 )
 
 # 2. Orient: Get high-level overview of codebase grouped by community clusters
@@ -162,6 +167,15 @@ nelgraph.dump_context_to_file("execute", "context_export.md", format="markdown")
 
 # 7. Mark Tested: Persist unit test completion status directly into Neo4j
 nelgraph.mark_tested("execute", file="src/processors/order.py")
+
+# 8. Autonomous Test Generation: Trigger the Commander-Worker self-healing loop
+report = nelgraph.run_test_generation(
+    target="execute", 
+    mode="unit", 
+    file="src/processors/order.py"
+)
+print("Test Generation Summary:", report["summary"])
+print("Bugs Found:", report["bugs_found"])
 ```
 
 ---
@@ -179,6 +193,29 @@ To ensure complex codebases are easy to explore, the visualizer uses customized 
 * **Anti-Overlap Collision**: Integrates `forceCollide` representing nodes as physical circles with safety margins (`radius + 14px`). Node labels and icons never overlap.
 * **Compact Peripheries**: Restricts many-body repulsion (`charge`) to a maximum radius using `distanceMax(250)`. This prevents disconnected files and external libraries from floating away into infinity, keeping them compactly structured around the main clusters.
 * **Stretched Clusters**: Adjusts default link distances to `80px`, spreading out highly connected clusters for clean visibility.
+
+---
+
+## 🧠 Autonomous Test Generation & Self-Healing
+
+`nelgraph` features an advanced, agentic multi-model test generation suite designed to autonomously build, execute, and fix test suites:
+
+### 1. Multi-Agent Orchestration
+* **Commander (`deepseek/deepseek-r1`)**: Analyzes the graph structure, dependencies, and imports to outline a structured JSON test plan. If tests fail, it acts as a diagnostics agent to differentiate between test logic errors and real codebase bugs.
+* **Planner (`deepseek/deepseek-v4-flash`)**: Facilitates step-by-step re-planning when a test failure is intercepted. It combines the original plan with error logs to devise a refined mock configuration.
+* **Worker (`qwen/qwen-2.5-coder-32b-instruct`)**: Receives the target code context, test plan, and mocks configuration to generate clean, framework-specific code. In python code generation, it uses a **3-attempt retry loop with syntax verification** (AST parse validation) to prevent raw Python syntax errors from getting into the file.
+
+### 2. Diagnostic Self-Healing Loop
+When a generated test fails:
+1. The execution error output is caught and sent to the **Planner/Commander**.
+2. The Planner performs a re-planning step, diagnosing the failure.
+3. The **Worker** is invoked with the failure diagnoses to rewrite the test.
+4. This self-healing process executes up to `MAX_HEAL_RETRIES` (default: `3`) until either the test suite passes or the retry limit is exhausted.
+
+### 3. Customization Protection (Incremental Registry)
+An incremental synchronization registry (`.graphrag_data/test_registry.json`) tracks both source function hashes and generated test file hashes. 
+* If the source code of a function changes, its test is automatically regenerated.
+* If a developer manually edits or customizes a generated test file, `nelgraph` detects the hash mismatch and **skips regeneration** to prevent overwriting user modifications.
 
 ---
 

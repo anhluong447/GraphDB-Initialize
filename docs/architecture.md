@@ -197,3 +197,54 @@ To wipe the database clean and do a full re-parse of the codebase:
 python initialize_graph.py --force-init
 ```
 During initialization, a database liveness probe `_wait_for_neo4j()` will poll the database for up to 60 seconds until the port is open and Bolt handshake is ready.
+
+---
+
+## 6. Autonomous Test Generation & Self-Healing Agent Subsystem (`nelgraph`)
+
+The `nelgraph` module introduces an agentic testing subsystem designed to autonomously generate, execute, diagnose, and self-heal test suites for codebase functions.
+
+```mermaid
+graph TD
+    Target[Target Function] -->|Context from GraphRAG| Commander[Commander: deepseek-r1]
+    Commander -->|JSON Test Plan| Worker[Worker: qwen-2.5-coder]
+    
+    subgraph Worker Retry Loop (Up to 3x)
+        Worker -->|Generate Code| AST[AST Parse Syntax Validation]
+        AST -->|Syntax Error| Worker
+        AST -->|Valid Python| Write[Write to tests/test_*.py]
+    end
+    
+    Write --> TestRunner[Test Runner: pytest]
+    TestRunner -->|Pass| Success[Registry Update & Save]
+    TestRunner -->|Fail| Diagnose[Planner/Commander: Diagnose & Re-plan]
+    
+    Diagnose -->|Heal Loop: Max 3 Retries| Worker
+```
+
+### 6.1 Multi-Agent Orchestration Role-Play
+The generation framework divides responsibilities across three specialized LLMs:
+1. **Commander (`deepseek/deepseek-r1`)**: Uses reasoning/thinking paths to analyze graph neighbors, external imports, and mock targets. It compiles a rigorous JSON-formatted test plan. After test failures, the Commander acts as a diagnostic agent to inspect stdout/stderr tracebacks, determine if the failure is a test setup error or a real bug in the production codebase, and issue remediation steps.
+2. **Planner (`deepseek/deepseek-v4-flash`)**: Facilitates step-by-step re-planning when a test failure is intercepted. It combines the original plan with error logs to devise a refined mock configuration.
+3. **Worker (`qwen/qwen-2.5-coder-32b-instruct`)**: Receives the target code context, test plan, and mocks configuration to generate clean, framework-specific code (e.g. `pytest` on python or `jest` on javascript).
+
+### 6.2 Worker Generation Retry with AST Syntax Validation
+To prevent invalid syntax (e.g. unescaped quotes, trailing commas, or truncated strings) from corrupting the test files, the Worker generation runs in a strict validation wrapper:
+- The Worker attempts code generation up to **3 times**.
+- Upon receiving the generated string, the system parses it using Python's native `ast.parse()` module.
+- If a `SyntaxError` is detected, the system logs the traceback error details and triggers a retry, feeding back the syntax error description to the model.
+- If all three attempts fail or produce syntax errors, the execution is safely terminated, avoiding write corruption.
+
+### 6.3 Diagnostic Self-Healing Loop
+If a valid test file is written but fails execution during runtime:
+1. The test runner output is captured.
+2. The **Planner** performs a re-planning step, diagnosing the failure.
+3. The **Worker** is invoked with the failure diagnoses to rewrite the test.
+4. This self-healing process executes up to `MAX_HEAL_RETRIES` (default: `3`) until either the test suite passes or the retry limit is exhausted.
+
+### 6.4 Registry & Developer Customization Protection
+To balance automation with developer control, the system maintains a test registry file at `.graphrag_data/test_registry.json`.
+- It tracks the SHA256 hashes of the target function source code and the generated test file.
+- If a developer manually edits or overrides a generated test file, the test file hash changes.
+- During incremental synchronization or test runs, the system detects this mismatch and automatically **skips regeneration** for that test file, ensuring developer modifications are never overwritten.
+
