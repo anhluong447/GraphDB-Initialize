@@ -67,7 +67,7 @@ ENRICH_MIN_COMPLEXITY = int(os.getenv("ENRICH_MIN_COMPLEXITY", "2"))
 # TestAgent — 3-layer autonomous test generation
 COMMANDER_MODEL = os.getenv("COMMANDER_MODEL", "deepseek/deepseek-r1")
 PLANNER_MODEL = os.getenv("PLANNER_MODEL", "deepseek/deepseek-v4-flash")
-WORKER_MODEL = os.getenv("WORKER_MODEL", "qwen/qwen3-coder")
+WORKER_MODEL = os.getenv("WORKER_MODEL", "qwen/qwen3-coder-next")
 
 # Fallback models (comma-separated lists) for resilience
 COMMANDER_FALLBACKS = [m.strip() for m in os.getenv("COMMANDER_FALLBACKS", "").split(",") if m.strip()]
