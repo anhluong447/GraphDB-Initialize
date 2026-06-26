@@ -68,23 +68,89 @@ def _get_worker():
     return _worker_client
 
 
-def _call_llm_with_retry(client_fn, *args, **kwargs):
-    """Executes chat.completions.create with 3 attempts on API or Connection errors."""
+def _call_llm_with_retry(client_fn, role: str = None, messages: list = None, max_tokens=None, timeout=None, model=None, **kwargs):
+    """Executes chat.completions.create with fallback models and retry on errors."""
     import time
-    max_attempts = 3
-    delay = 2.0
-    
-    for attempt in range(1, max_attempts + 1):
-        try:
-            client = client_fn()
-            return client.chat.completions.create(*args, **kwargs)
-        except (openai.APIError, openai.APIConnectionError, openai.APITimeoutError, ConnectionError, TimeoutError) as e:
-            if attempt == max_attempts:
-                print(f"[LLM Retry] Max attempts reached. Propagating error: {e}")
-                raise e
-            print(f"[LLM Retry] Attempt {attempt} failed: {e}. Retrying in {delay}s...")
-            time.sleep(delay)
-            delay *= 2
+    cfg = _cfg()
+
+    # If role is not explicitly provided, infer it from client_fn or model
+    if not role:
+        fn_name = getattr(client_fn, "__name__", "")
+        if "commander" in fn_name or model == cfg.COMMANDER_MODEL:
+            role = "commander"
+        elif "planner" in fn_name or model == cfg.PLANNER_MODEL:
+            role = "planner"
+        else:
+            role = "worker"
+
+    # Determine primary model and fallback models for this role
+    if role == "commander":
+        primary = cfg.COMMANDER_MODEL
+        fallbacks = getattr(cfg, "COMMANDER_FALLBACKS", ["meta-llama/llama-3.3-70b-instruct", "google/gemini-2.5-pro"])
+    elif role == "planner":
+        primary = cfg.PLANNER_MODEL
+        fallbacks = getattr(cfg, "PLANNER_FALLBACKS", ["google/gemini-2.5-flash", "deepseek/deepseek-chat", "meta-llama/llama-3.3-70b-instruct"])
+    else:
+        primary = cfg.WORKER_MODEL
+        fallbacks = getattr(cfg, "WORKER_FALLBACKS", ["meta-llama/llama-3.3-70b-instruct", "google/gemini-2.5-flash", "deepseek/deepseek-chat"])
+
+    # If the user passed a specific model, make sure it is the primary model in our list
+    if model and model != primary:
+        primary = model
+
+    # Combine primary and fallbacks to create a candidate models list
+    candidate_models = [primary] + [f for f in fallbacks if f != primary]
+
+    last_error = None
+    for candidate in candidate_models:
+        # Try up to 2 times for each model
+        max_attempts = 2
+        delay = 2.0
+        for attempt in range(1, max_attempts + 1):
+            try:
+                client = client_fn()
+                # OpenRouter extra_body fallback list
+                rem_fallbacks = [m for m in candidate_models if m != candidate]
+                extra_body = kwargs.get("extra_body") or {}
+                if rem_fallbacks and "models" not in extra_body:
+                    extra_body = {**extra_body, "models": rem_fallbacks}
+
+                call_kwargs = {
+                    "model": candidate,
+                    "messages": messages,
+                    "extra_body": extra_body,
+                    **{k: v for k, v in kwargs.items() if k not in ("extra_body", "model")}
+                }
+                if max_tokens is not None:
+                    call_kwargs["max_tokens"] = max_tokens
+                if timeout is not None:
+                    call_kwargs["timeout"] = timeout
+
+                response = client.chat.completions.create(**call_kwargs)
+
+                # Validate response choice to capture OpenRouter-level finish_reason errors
+                if response.choices:
+                    choice = response.choices[0]
+                    finish_reason = getattr(choice, "finish_reason", None)
+                    if finish_reason in ("error", "length"):
+                        err_info = getattr(choice, "error", None) or f"finish_reason is '{finish_reason}' (truncated)"
+                        raise ValueError(f"OpenRouter response truncated or errored: {err_info}")
+                
+                return response
+
+            except Exception as e:
+                last_error = e
+                # Print to logs so user/developer sees the fallback triggering
+                print(f"[LLM Retry] Model {candidate} (attempt {attempt}/{max_attempts}) failed: {e}")
+                if attempt < max_attempts:
+                    print(f"[LLM Retry] Retrying {candidate} in {delay}s...")
+                    time.sleep(delay)
+                    delay *= 2
+        
+        print(f"[LLM Retry] Model {candidate} failed all attempts. Trying next fallback model...")
+
+    print(f"[LLM Retry] All candidate models failed. Propagating final error: {last_error}")
+    raise last_error
 
 
 # ─── Hash helpers ───────────────────────────────────────────────────────────
@@ -495,6 +561,7 @@ class TestAgent:
             try:
                 import json_repair
                 plan = json_repair.loads(raw)
+                self.log("Recovered plan via json_repair.")
                 return plan
             except Exception:
                 return None
