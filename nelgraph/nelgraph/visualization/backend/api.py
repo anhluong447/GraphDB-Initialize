@@ -365,7 +365,7 @@ def get_task_status(task_id: str):
     """Poll the status of a test generation task."""
     task = _test_tasks.get(task_id)
     if not task:
-        return {"error": "Task not found"}
+        return {"status": "not_found", "error": "Task not found"}
     return task
 
 

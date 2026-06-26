@@ -59,12 +59,39 @@ export default function TestCoverageView({ status, onMarkTested, onGenerateTest 
       .finally(() => setLoading(false))
   }, [])
 
+  // On mount: validate any persisted "running" state against the backend
+  useEffect(() => {
+    if (bulkTaskId && bulkStatus === 'running') {
+      axios.get(`${API}/task/${bulkTaskId}/status`)
+        .then(({ data }) => {
+          if (data.error || data.status === 'not_found' || !data.status) {
+            // Task lost (server restart) — clear stale state
+            setBulkStatus(null)
+            setBulkProgress(null)
+            setBulkTaskId(null)
+          }
+        })
+        .catch(() => {
+          setBulkStatus(null)
+          setBulkProgress(null)
+          setBulkTaskId(null)
+        })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!bulkTaskId || bulkStatus !== 'running') return
 
     const interval = setInterval(async () => {
       try {
         const { data } = await axios.get(`${API}/task/${bulkTaskId}/status`)
+        // Handle task not found (backend restarted, lost in-memory tasks)
+        if (data.error || data.status === 'not_found') {
+          setBulkStatus(null)
+          setBulkProgress(null)
+          setBulkTaskId(null)
+          return
+        }
         if (data.status === 'running') {
           if (data.progress) {
             setBulkProgress(data.progress)
@@ -202,7 +229,11 @@ export default function TestCoverageView({ status, onMarkTested, onGenerateTest 
       {/* Bulk progress banner */}
       {bulkStatus === 'running' && bulkProgress && (
         <div style={styles.banner}>
-          <div style={{ fontWeight: 500, marginBottom: 6, fontSize: 12 }}>🚀 Generating All Tests (Bulk Mode)...</div>
+          <div style={{ fontWeight: 500, marginBottom: 6, fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>🚀 Generating All Tests (Bulk Mode)...</span>
+            <button onClick={() => { setBulkStatus(null); setBulkProgress(null); setBulkTaskId(null) }}
+              style={{ border: 'none', background: 'transparent', color: 'var(--color-text-tertiary)', cursor: 'pointer', fontSize: 14, padding: '0 2px', lineHeight: 1 }}>×</button>
+          </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
             <span>Current: <strong style={{ color: 'var(--color-accent)' }}>{bulkProgress.current || 'Planning...'}</strong></span>
             <span>{bulkProgress.done} / {bulkProgress.total}</span>
