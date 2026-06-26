@@ -70,9 +70,9 @@ PLANNER_MODEL = os.getenv("PLANNER_MODEL", "deepseek/deepseek-v4-flash")
 WORKER_MODEL = os.getenv("WORKER_MODEL", "qwen/qwen-2.5-coder-32b-instruct")
 
 # Fallback models (comma-separated lists) for resilience
-COMMANDER_FALLBACKS = [m.strip() for m in os.getenv("COMMANDER_FALLBACKS", "meta-llama/llama-3.3-70b-instruct,google/gemini-2.5-pro").split(",") if m.strip()]
-PLANNER_FALLBACKS = [m.strip() for m in os.getenv("PLANNER_FALLBACKS", "google/gemini-2.5-flash,deepseek/deepseek-chat,meta-llama/llama-3.3-70b-instruct").split(",") if m.strip()]
-WORKER_FALLBACKS = [m.strip() for m in os.getenv("WORKER_FALLBACKS", "meta-llama/llama-3.3-70b-instruct,google/gemini-2.5-flash,deepseek/deepseek-chat").split(",") if m.strip()]
+COMMANDER_FALLBACKS = [m.strip() for m in os.getenv("COMMANDER_FALLBACKS", "").split(",") if m.strip()]
+PLANNER_FALLBACKS = [m.strip() for m in os.getenv("PLANNER_FALLBACKS", "").split(",") if m.strip()]
+WORKER_FALLBACKS = [m.strip() for m in os.getenv("WORKER_FALLBACKS", "").split(",") if m.strip()]
 
 TEST_FRAMEWORK = os.getenv("TEST_FRAMEWORK", "pytest")  # pytest | jest | vitest
 PYTEST_PATH = os.getenv("PYTEST_PATH", "")

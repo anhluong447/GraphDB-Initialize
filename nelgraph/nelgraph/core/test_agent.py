@@ -86,13 +86,13 @@ def _call_llm_with_retry(client_fn, role: str = None, messages: list = None, max
     # Determine primary model and fallback models for this role
     if role == "commander":
         primary = cfg.COMMANDER_MODEL
-        fallbacks = getattr(cfg, "COMMANDER_FALLBACKS", ["meta-llama/llama-3.3-70b-instruct", "google/gemini-2.5-pro"])
+        fallbacks = getattr(cfg, "COMMANDER_FALLBACKS", [])
     elif role == "planner":
         primary = cfg.PLANNER_MODEL
-        fallbacks = getattr(cfg, "PLANNER_FALLBACKS", ["google/gemini-2.5-flash", "deepseek/deepseek-chat", "meta-llama/llama-3.3-70b-instruct"])
+        fallbacks = getattr(cfg, "PLANNER_FALLBACKS", [])
     else:
         primary = cfg.WORKER_MODEL
-        fallbacks = getattr(cfg, "WORKER_FALLBACKS", ["meta-llama/llama-3.3-70b-instruct", "google/gemini-2.5-flash", "deepseek/deepseek-chat"])
+        fallbacks = getattr(cfg, "WORKER_FALLBACKS", [])
 
     # If the user passed a specific model, make sure it is the primary model in our list
     if model and model != primary:
@@ -103,8 +103,8 @@ def _call_llm_with_retry(client_fn, role: str = None, messages: list = None, max
 
     last_error = None
     for candidate in candidate_models:
-        # Try up to 2 times for each model
-        max_attempts = 2
+        # Try up to 3 times for each model
+        max_attempts = 3
         delay = 2.0
         for attempt in range(1, max_attempts + 1):
             try:
@@ -140,14 +140,15 @@ def _call_llm_with_retry(client_fn, role: str = None, messages: list = None, max
 
             except Exception as e:
                 last_error = e
-                # Print to logs so user/developer sees the fallback triggering
+                # Print to logs so user/developer sees the retry triggering
                 print(f"[LLM Retry] Model {candidate} (attempt {attempt}/{max_attempts}) failed: {e}")
                 if attempt < max_attempts:
                     print(f"[LLM Retry] Retrying {candidate} in {delay}s...")
                     time.sleep(delay)
                     delay *= 2
         
-        print(f"[LLM Retry] Model {candidate} failed all attempts. Trying next fallback model...")
+        if len(candidate_models) > 1:
+            print(f"[LLM Retry] Model {candidate} failed all attempts. Trying next fallback model...")
 
     print(f"[LLM Retry] All candidate models failed. Propagating final error: {last_error}")
     raise last_error
