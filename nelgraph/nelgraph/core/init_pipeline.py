@@ -53,10 +53,10 @@ def _wait_for_neo4j(timeout=60):
             driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
             with driver.session() as session:
                 session.run("RETURN 1").single()
-            driver.close()
+            # Omit driver.close() to avoid rare hang on Windows socket closure
             print(" -> Connection successful! Neo4j is ready.")
             return True
-        except Exception:
+        except Exception as e:
             print(".", end="", flush=True)
             time.sleep(2)
     print("\n  ⚠ Warning: Neo4j did not respond within the timeout. Proceeding anyway...")

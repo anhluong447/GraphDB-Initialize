@@ -179,8 +179,12 @@ Produce a JSON test plan with EXACTLY this structure:
 }}
 
 RULES:
+- file_path MUST be in the format "tests/test_<module>.py" (where <module> is the name of the source module, e.g. "tests/test_middleware.py"). Do NOT generate or overwrite "tests/conftest.py" or other configuration files.
 - mock.target must be the EXACT import path as used in the source code (e.g. "myapp.db.session.get")
 - inputs and expected must be CONCRETE values, not "auto-generate"
+- CRITICAL FOR EXCEPTION PROPAGATION: Trace the control flow of the source code carefully. If an exception can be raised in a statement that is not enclosed in a try-except block, then that exception is expected to propagate to the caller. Do not assume the function catches it. Update your plan's expected assertions to expect the exception to be raised.
+- AVOID UNREALISTIC TEST CASES: Do not plan test cases that hit system or language limits (such as creating hundreds of recursive middleware layers causing RecursionError, or mocking hundreds of objects). Keep unit test cases simple, realistic (e.g., list sizes under 10), and focused on the target function's design.
+- CHECK CODEBASE BEHAVIOR VS EXPECTATIONS: Verify if your test expectations align with the codebase's actual implementation. If the codebase has a certain behavior (e.g., it does not clear pre-existing errors in a context), assert that exact behavior instead of assuming it behaves differently.
 - If there is error_feedback, adjust the strategy — do not repeat the failed approach.
 - Return ONLY valid JSON, no markdown fences.
 """
@@ -189,7 +193,7 @@ HEAL_PLANNER_PROMPT = """You are an expert QA planner reviewing a failed test.
 A Worker generated test code based on your previous plan, but it failed.
 Your job is to analyze the failure and produce a REVISED test plan.
 
-## Original Source Code
+## Original Source Code (from file: {source_file_path})
 {source_code}
 
 ## Previous Test Plan
@@ -208,7 +212,12 @@ Then produce a REVISED plan in the same JSON structure as before.
 If diagnosis is "real_bug" — set "real_bug": true at top level and explain in strategy_summary.
 Otherwise — fix the plan so Worker can write correct test code.
 
-Return ONLY valid JSON, no markdown fences.
+RULES:
+- file_path MUST be in the format "tests/test_<module>.py" (where <module> is the name of the source module, e.g. "tests/test_middleware.py"). Do NOT generate or overwrite "tests/conftest.py" or other configuration files.
+- CRITICAL FOR EXCEPTION PROPAGATION: Trace the traceback of the failure carefully. If the error output shows an unhandled exception propagating from a line in the target function, look at the target function's source code. If that line does not have a try-except block enclosing it, then the exception is expected to propagate to the caller. Do not assume the function catches it. Update your plan's expected assertions to expect the exception to be raised.
+- AVOID UNREALISTIC TEST CASES: Do not plan test cases that hit system or language limits (such as creating hundreds of recursive middleware layers causing RecursionError, or mocking hundreds of objects). Keep unit test cases simple, realistic (e.g., list sizes under 10), and focused on the target function's design.
+- CHECK CODEBASE BEHAVIOR VS EXPECTATIONS: Before concluding that a failure indicates a "real_bug" in the codebase, verify if the failure is simply due to a mismatch between your test plan's assumptions/expectations and the codebase's actual implementation. If so, adjust the test plan's assertions to match the codebase behavior (e.g., if the codebase does not clear pre-existing errors in a context, expect them to persist). Only flag "real_bug": true if the codebase violates its own design or contract.
+- Return ONLY valid JSON, no markdown fences.
 """
 
 GENERATOR_PROMPT = """You are an expert test code writer. Write complete, runnable test code based on this plan.
@@ -216,7 +225,7 @@ GENERATOR_PROMPT = """You are an expert test code writer. Write complete, runnab
 ## Test Plan
 {plan_json}
 
-## Source Code of Target Function(s)
+## Source Code of Target Function(s) (from file: {source_file_path})
 {source_code}
 
 ## Testing Framework: {framework}
@@ -232,8 +241,15 @@ RULES:
 - Use descriptive test names matching the plan's test case names.
 - Include proper setup/teardown if needed.
 - Return ONLY the Python/JS code, no markdown fences, no explanations.
+- CRITICAL FOR IMPORTS: The file path of the source code is {source_file_path}. Make sure to import the target classes/functions using the correct module path relative to the repository root (e.g., if the file is src/core/middleware.py, import from src.core.middleware, NOT from source).
+- CRITICAL FOR ASYNC MOCKS: When mocking an async method/function that accepts an async callback (like next_call), do NOT use a synchronous lambda as the side_effect or return value. Instead, define an `async def` helper function that properly awaits the callback (e.g., `async def mock_side_effect(ctx, next_call): return await next_call(ctx)`) and assign it to the mock's `side_effect`.
+- CRITICAL FOR SYNC VS ASYNC MOCKING: Carefully check how parameters/callables are called in the target function. If a callable parameter (such as a callback like core_eval) is called synchronously (e.g., `core_eval(ctx)` without `await`), you MUST mock it as a regular Mock (or MagicMock/function/lambda), NOT an AsyncMock. Mocking a synchronous callable as AsyncMock will return an unawaited coroutine, causing tests to fail.
+- CRITICAL FOR CLASS INSTANTIATION: Avoid monkey patching attributes (using unittest.mock.patch or assigning directly) on class objects. Instead, analyze the class's constructor/initializer (__init__ method) parameters and instantiate the class with the desired dependencies/mock values passed directly to the constructor.
+- CRITICAL FOR EXCEPTION TESTING: Analyze the exception handling logic of the source code. If a function lets exceptions propagate without catching them, use appropriate test assertions (e.g., pytest.raises for Python, or expect().toThrow() for JS) to verify the exceptions, rather than asserting that the return value has the error.
+- CRITICAL FOR MOCK ASSERTIONS: Python's unittest.mock.Mock does NOT support 'assert_called_before' or 'assert_called_after'. To verify call order, either use a parent Mock/MagicMock and check parent.mock_calls, or check timestamps/call lists, or avoid asserting call order if simple invocation asserts are sufficient.
 - CRITICAL: If previous_error is not "None", you must analyze and fix that specific error, and avoid repeating the failed approach.
 """
+
 
 
 # ─── TestAgent ──────────────────────────────────────────────────────────────
@@ -492,8 +508,10 @@ class TestAgent:
         self.log("Planner re-planning after Worker failure...")
         cfg = _cfg()
         source_code = self._extract_source_code(context)
+        source_file_path = context.get("primary", {}).get("file", "unknown")
 
         prompt = HEAL_PLANNER_PROMPT.format(
+            source_file_path=source_file_path,
             source_code=source_code[:4000],
             previous_plan=json.dumps(previous_plan, indent=2)[:2000],
             test_code=test_code[:3000],
@@ -589,8 +607,10 @@ class TestAgent:
                         })
                         continue
 
+            source_file_path = context.get("primary", {}).get("file", "unknown")
             prompt = GENERATOR_PROMPT.format(
                 plan_json=json.dumps(test_file_plan, indent=2),
+                source_file_path=source_file_path,
                 source_code=source_code,
                 framework=cfg.TEST_FRAMEWORK,
                 previous_error=previous_error or "None — this is the initial generation.",
@@ -678,11 +698,68 @@ class TestAgent:
         self.generated_files = generated
         return generated
 
+    def _ensure_async_dependencies(self):
+        """Checks if generated tests have async test cases and ensures pytest-asyncio is installed in target env."""
+        cfg = _cfg()
+        if cfg.TEST_FRAMEWORK != "pytest":
+            return
+
+        has_async = False
+        for gen in self.generated_files:
+            test_code = gen.get("test_code", "")
+            if "async def " in test_code or "@pytest.mark.asyncio" in test_code:
+                has_async = True
+                break
+
+        if not has_async:
+            return
+
+        pip_path = None
+        # Check standard virtualenv locations
+        windows_pip = os.path.join(cfg.CODEBASE_PATH, ".venv", "Scripts", "pip.exe")
+        unix_pip = os.path.join(cfg.CODEBASE_PATH, ".venv", "bin", "pip")
+
+        if os.path.exists(windows_pip):
+            pip_path = windows_pip
+        elif os.path.exists(unix_pip):
+            pip_path = unix_pip
+        else:
+            if cfg.PYTEST_PATH:
+                dir_name = os.path.dirname(cfg.PYTEST_PATH)
+                for name in ("pip.exe", "pip"):
+                    p = os.path.join(dir_name, name)
+                    if os.path.exists(p):
+                        pip_path = p
+                        break
+            if not pip_path:
+                dir_name = os.path.dirname(sys.executable)
+                for name in ("pip.exe", "pip"):
+                    p = os.path.join(dir_name, name)
+                    if os.path.exists(p):
+                        pip_path = p
+                        break
+
+        if not pip_path:
+            pip_path = "pip"
+
+        try:
+            res = subprocess.run([pip_path, "show", "pytest-asyncio"], capture_output=True, text=True)
+            if res.returncode != 0:
+                self.log(f"Async tests detected but pytest-asyncio is missing. Installing pytest-asyncio via {pip_path}...")
+                install_res = subprocess.run([pip_path, "install", "pytest-asyncio"], capture_output=True, text=True)
+                if install_res.returncode == 0:
+                    self.log("Successfully installed pytest-asyncio.")
+                else:
+                    self.log(f"Warning: Failed to install pytest-asyncio: {install_res.stderr}")
+        except Exception as e:
+            self.log(f"Warning: Error checking/installing pytest-asyncio: {e}")
+
     # ─── STEP 4: Run tests ─────────────────────────────────────────────
     def _run_tests(self) -> list:
         """Execute generated test files and parse results."""
         self.log("Running generated tests...")
         cfg = _cfg()
+        self._ensure_async_dependencies()
         results = []
 
         for gen in self.generated_files:
@@ -702,25 +779,44 @@ class TestAgent:
         """Run a single test file and return structured results."""
         cfg = _cfg()
 
+        # Try to resolve virtual environment executables inside the codebase
+        win_venv_pytest = os.path.join(cfg.CODEBASE_PATH, ".venv", "Scripts", "pytest.exe")
+        unix_venv_pytest = os.path.join(cfg.CODEBASE_PATH, ".venv", "bin", "pytest")
+        win_venv_python = os.path.join(cfg.CODEBASE_PATH, ".venv", "Scripts", "python.exe")
+        unix_venv_python = os.path.join(cfg.CODEBASE_PATH, ".venv", "bin", "python")
+
+        local_pytest = win_venv_pytest if os.path.exists(win_venv_pytest) else (unix_venv_pytest if os.path.exists(unix_venv_pytest) else None)
+        local_python = win_venv_python if os.path.exists(win_venv_python) else (unix_venv_python if os.path.exists(unix_venv_python) else None)
+
         if cfg.TEST_FRAMEWORK == "pytest":
             import shutil
-            pytest_exe = cfg.PYTEST_PATH or shutil.which("pytest")
+            pytest_exe = cfg.PYTEST_PATH or local_pytest or shutil.which("pytest")
             if pytest_exe:
                 cmd = [pytest_exe, test_file_path, "-v", "--tb=short", "--no-header", "-q"]
             else:
+                python_exe = local_python or sys.executable
                 cmd = [
-                    sys.executable, "-m", "pytest", test_file_path,
+                    python_exe, "-m", "pytest", test_file_path,
                     "-v", "--tb=short", "--no-header", "-q"
                 ]
         elif cfg.TEST_FRAMEWORK in ("jest", "vitest"):
             cmd = ["npx", cfg.TEST_FRAMEWORK, test_file_path, "--no-coverage"]
         else:
             import shutil
-            pytest_exe = cfg.PYTEST_PATH or shutil.which("pytest")
+            pytest_exe = cfg.PYTEST_PATH or local_pytest or shutil.which("pytest")
             if pytest_exe:
                 cmd = [pytest_exe, test_file_path, "-v", "--tb=short"]
             else:
-                cmd = [sys.executable, "-m", "pytest", test_file_path, "-v", "--tb=short"]
+                python_exe = local_python or sys.executable
+                cmd = [python_exe, "-m", "pytest", test_file_path, "-v", "--tb=short"]
+
+        # Prepare environment with PYTHONPATH set to the codebase root
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        codebase_abs = os.path.abspath(cfg.CODEBASE_PATH)
+        if "PYTHONPATH" in env:
+            env["PYTHONPATH"] = f"{codebase_abs}{os.pathsep}{env['PYTHONPATH']}"
+        else:
+            env["PYTHONPATH"] = codebase_abs
 
         try:
             proc = subprocess.run(
@@ -729,7 +825,7 @@ class TestAgent:
                 capture_output=True,
                 text=True,
                 timeout=60,
-                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                env=env,
             )
             output = (proc.stdout or "") + (proc.stderr or "")
 
@@ -860,8 +956,20 @@ class TestAgent:
         return "\n".join(parts)
 
     def _extract_source_code(self, context: dict) -> str:
-        """Extract source code from context for use in prompts."""
+        """Extract source code from context for use in prompts. Uses the full file if available on disk."""
         primary = context.get("primary", {})
+        file_path = primary.get("file")
+        if file_path:
+            cfg = _cfg()
+            abs_path = os.path.join(cfg.CODEBASE_PATH, file_path).replace("\\", "/")
+            if os.path.exists(abs_path):
+                try:
+                    if os.path.getsize(abs_path) < 150 * 1024:
+                        with open(abs_path, "r", encoding="utf-8") as f:
+                            return f.read()
+                except Exception as e:
+                    self.log(f"Warning: Failed to read full file {file_path} from disk: {e}")
+
         if context["type"] == "function":
             return primary.get("raw_code", "")
         elif context["type"] == "class":
@@ -870,3 +978,4 @@ class TestAgent:
         elif context["type"] == "search":
             return primary.get("raw_code", "")
         return ""
+
